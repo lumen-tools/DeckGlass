@@ -1,0 +1,111 @@
+name: Release
+
+# Builds the plugin zip and publishes "Version <x.y.z>" when the version in
+# package.json changes on main (or when started by hand).
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Shader sources the release is built and tested against.
+  SLANG_SHADERS_REF: 3685eda59ffd2ebe1b12cc4640581dc23552ce88
+  RETRO_CRISIS_TAG: "20260927"
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(jq -r .version package.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists, nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ ! -f "release-notes/$VERSION.md" ]; then
+            echo "::error::release-notes/$VERSION.md is missing"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: pnpm/action-setup@v4
+        if: steps.version.outputs.exists == 'false'
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.exists == 'false'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.version.outputs.exists == 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch libretro slang-shaders
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          git init -q "$RUNNER_TEMP/slang-shaders"
+          cd "$RUNNER_TEMP/slang-shaders"
+          git remote add origin https://github.com/libretro/slang-shaders.git
+          git fetch -q --depth 1 origin "$SLANG_SHADERS_REF"
+          git checkout -q FETCH_HEAD
+
+      - name: Fetch Retro Crisis
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          mkdir -p "$RUNNER_TEMP/rc-zip" "$RUNNER_TEMP/rc"
+          gh release download "$RETRO_CRISIS_TAG" --repo RetroCrisis/Retro-Crisis-GDV-NTSC \
+            --pattern '*.zip' --dir "$RUNNER_TEMP/rc-zip"
+          unzip -q "$RUNNER_TEMP"/rc-zip/*.zip -d "$RUNNER_TEMP/rc"
+          test -d "$RUNNER_TEMP/rc/retro crisis"
+          gh api "repos/RetroCrisis/Retro-Crisis-GDV-NTSC/contents/LICENSE?ref=$RETRO_CRISIS_TAG" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/rc/LICENSE"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build plugin zip
+        if: steps.version.outputs.exists == 'false'
+        run: ./package.sh "$RUNNER_TEMP/slang-shaders" "$RUNNER_TEMP/rc"
+
+      - name: Check the zip
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          ZIP="out/DeckGlass-${{ steps.version.outputs.version }}.zip"
+          unzip -l "$ZIP" > "$RUNNER_TEMP/list.txt"
+          for f in DeckGlass/main.py DeckGlass/dist/index.js DeckGlass/plugin.json DeckGlass/LICENSE \
+                   DeckGlass/slangfx/bin/glslang DeckGlass/slangfx/bin/spirv-cross DeckGlass/shaders/rc/LICENSE; do
+            grep -q " $f$" "$RUNNER_TEMP/list.txt" || { echo "::error::$f missing from zip"; exit 1; }
+          done
+          echo "presets: $(grep -c '\.slangp$' "$RUNNER_TEMP/list.txt")"
+
+      - name: Publish release
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          FLAGS=""
+          # 0.x versions are betas
+          case "$VERSION" in 0.*|*-*) FLAGS="--prerelease" ;; esac
+          gh release create "v$VERSION" "out/DeckGlass-$VERSION.zip" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Version $VERSION" --notes-file "release-notes/$VERSION.md" $FLAGS
+        env:
+          GH_TOKEN: ${{ github.token }}

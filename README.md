@@ -39,6 +39,10 @@ Presets are picked in a file browser, like in RetroArch, with two top folders:
 - A few presets cannot be converted (e.g. matrix ternaries); the error is shown in the plugin.
 - gamescope does not support mipmaps, so `mipmap_input` is ignored.
 
+## Releases
+
+Raising `version` in `package.json` on `main` (together with `release-notes/<version>.md`) makes GitHub Actions build the zip and publish "Version <version>"; 0.x versions are marked as pre-releases.
+
 ## Building
 
 ```bash
