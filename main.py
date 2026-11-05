@@ -42,7 +42,7 @@ BUNDLED_SLANG = os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")
 CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")
 LIBRARIES = [
     ("RetroArch", BUNDLED_SLANG),
-    ("RetroCrisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
+    ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
     ("Custom", CUSTOM_DIR),
 ]
 
@@ -163,6 +163,33 @@ def _build_library():
     return {"name": "", "folders": libs, "presets": []}
 
 
+# Library names that changed between versions: old preset-key prefix -> new one.
+RENAMED_LIBRARIES = {"RetroCrisis/": "Retro Crisis/"}
+
+
+def _migrate_key(key):
+    if isinstance(key, str):
+        for old, new in RENAMED_LIBRARIES.items():
+            if key.startswith(old):
+                return new + key[len(old):]
+    return key
+
+
+def _migrate(data):
+    """Rewrite preset keys saved by older versions (settings, per-preset parameters,
+    per-game profiles)."""
+    def fix(block):
+        if "preset" in block:
+            block["preset"] = _migrate_key(block["preset"])
+        if isinstance(block.get("params"), dict):
+            block["params"] = {_migrate_key(k): v for k, v in block["params"].items()}
+    fix(data)
+    for prof in (data.get("profiles") or {}).values():
+        if isinstance(prof, dict):
+            fix(prof)
+    return data
+
+
 def _write_fx(fx):
     digest = hashlib.sha1(fx.encode()).hexdigest()[:12]
     os.makedirs(SHADERS_DIR, exist_ok=True)
@@ -234,7 +261,7 @@ class Plugin:
             with open(SETTINGS_FILE) as f:
                 data = json.load(f)
             s = dict(DEFAULT_SETTINGS)
-            s.update(data)
+            s.update(_migrate(data))
             Plugin.settings = s
         except FileNotFoundError:
             Plugin.settings = dict(DEFAULT_SETTINGS)

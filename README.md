@@ -21,7 +21,7 @@ gamescope can apply ReShade effects (`.fx`) to the image of the running game. De
 Presets are picked in a file browser, like in RetroArch, with three top folders:
 
 - **RetroArch:** the [libretro slang-shaders](https://github.com/libretro/slang-shaders). Mega Bezel, HDR shaders, test patterns and source-only folders are hidden.
-- **RetroCrisis:** the [Retro Crisis GDV-NTSC](https://github.com/RetroCrisis/Retro-Crisis-GDV-NTSC) presets (GPL-3), including the "720p Steam Deck" folder.
+- **Retro Crisis:** the [Retro Crisis GDV-NTSC](https://github.com/RetroCrisis/Retro-Crisis-GDV-NTSC) presets (GPL-3), including the "720p Steam Deck" folder.
 - **Custom:** your own presets. Copy them – with their folders – to `~/deckglass-shaders` (e.g. in desktop mode), then reopen the browser. Presets that point to RetroArch's shader folder (`shaders_slang/...`), such as presets saved in RetroArch or a newer Retro Crisis release, find those files in the bundled libretro shaders automatically.
 
 ## Usage
