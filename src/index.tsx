@@ -479,11 +479,7 @@ function Content() {
           <PanelSectionRow>
             <ToggleField
               label="Black bars top & bottom"
-              description={
-                bars
-                  ? "On: the game picture is 720 lines tall inside an 800-line image"
-                  : "Only needed if the emulator draws the bars itself"
-              }
+              description="Turn on if you see black bars above and below the game"
               checked={bars}
               onChange={(v) => change({ game_height: v ? 720 : 800 })}
             />
