@@ -1,6 +1,6 @@
 {
-  "name": "SlangDeck",
-  "author": "SlangDeck contributors",
+  "name": "DeckGlass",
+  "author": "DeckGlass contributors",
   "flags": ["debug"],
   "api_version": 1,
   "publish": {

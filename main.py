@@ -20,18 +20,19 @@ logger = decky.logger
 RESHADE_DIR = os.path.join(decky.DECKY_USER_HOME, ".local/share/gamescope/reshade")
 SHADERS_DIR = os.path.join(RESHADE_DIR, "Shaders")
 TEXTURES_DIR = os.path.join(RESHADE_DIR, "Textures")
-FX_PREFIX = "slangdeck_"
-LUT_ROOT = "slangdeck"
+FX_PREFIX = "deckglass_"
+LUT_ROOT = "deckglass"
 
 SETTINGS_DIR = decky.DECKY_PLUGIN_SETTINGS_DIR
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 CACHE_DIR = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "cache")
 
 # Shader libraries: bundled ones plus a user folder for own presets.
-USER_LIBRARY = os.path.join(decky.DECKY_USER_HOME, "slangdeck-shaders")
+# Layout mirrors RetroArch, so Retro Crisis' "../../../shaders_slang/..." paths resolve.
+USER_LIBRARY = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")
 LIBRARIES = [
-    ("RetroArch", os.path.join(PLUGIN_DIR, "shaders", "slang-shaders")),
-    ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "retro-crisis")),
+    ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
+    ("RetroArch", os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")),
     ("Eigene", USER_LIBRARY),
 ]
 
@@ -143,6 +144,8 @@ class Plugin:
                 continue
             groups = {}
             for p in sorted(Path(root).rglob("*.slangp")):
+                if "__MACOSX" in p.parts or p.name.startswith("._"):
+                    continue
                 rel = p.relative_to(root).as_posix()
                 folder = os.path.dirname(rel) or "."
                 groups.setdefault(folder, []).append({"key": f"{name}/{rel}", "label": p.stem})
@@ -276,7 +279,7 @@ class Plugin:
         await Plugin._load()
         async with Plugin.lock:
             await Plugin._apply()
-        logger.info("SlangDeck ready")
+        logger.info("DeckGlass ready")
 
     async def _unload(self):
         _xprop_set(None)

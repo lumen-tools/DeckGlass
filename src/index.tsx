@@ -54,6 +54,11 @@ function splitKey(key: string | null): { library: string; folder: string } | nul
   return { library: key.slice(0, i), folder: j < 0 ? "." : rel.slice(0, j) };
 }
 
+function preferredFolder(l: Library | undefined): string {
+  if (!l) return "";
+  return (l.groups.find((g) => /steam deck/i.test(g.folder)) ?? l.groups[0])?.folder ?? "";
+}
+
 function Content() {
   const [library, setLibrary] = useState<Library[]>([]);
   const [systems, setSystems] = useState<System[]>([]);
@@ -92,7 +97,7 @@ function Content() {
       const firstLib = sk?.library ?? l[0]?.library ?? "";
       setLib(firstLib);
       const libObj = l.find((x) => x.library === firstLib);
-      setFolder(sk?.folder ?? libObj?.groups[0]?.folder ?? "");
+      setFolder(sk?.folder ?? preferredFolder(libObj));
       if (st.preset) await run(() => reapply());
       else setError(st.last_error);
     })();
@@ -180,7 +185,7 @@ function Content() {
             onChange={(o) => {
               setLib(o.data);
               const l = library.find((x) => x.library === o.data);
-              setFolder(l?.groups[0]?.folder ?? "");
+              setFolder(preferredFolder(l));
             }}
           />
         </PanelSectionRow>
@@ -274,8 +279,8 @@ export default definePlugin(() => {
     setTimeout(report, 500);
   });
   return {
-    name: "SlangDeck",
-    titleView: <div className={staticClasses.Title}>SlangDeck</div>,
+    name: "DeckGlass",
+    titleView: <div className={staticClasses.Title}>DeckGlass</div>,
     content: <Content />,
     icon: <MdMonitor />,
     onDismount() {

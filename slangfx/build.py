@@ -108,6 +108,19 @@ def _fmt_float(v):
     return s if ("e" in s or "." in s) else s + ".0"
 
 
+def _clamp_param_indices(code):
+    """Parameters are compile-time constants here, so an index like a[int(PRM_x)] with an
+    out-of-range value (harmless at runtime in RetroArch) fails to compile. Clamp it."""
+    sizes = {m.group(1): int(m.group(2)) for m in re.finditer(r"\b(\w+)\[(\d+)\]\s*(?:=|;)", code)}
+
+    def rep(m):
+        name, idx = m.group(1), m.group(2)
+        if name in sizes and "PRM_" in idx:
+            return f"{name}[clamp(int({idx}), 0, {sizes[name] - 1})]"
+        return m.group(0)
+    return re.sub(r"\b(\w+)\[([^\[\]]+)\]", rep, code)
+
+
 def _fix_literal_swizzles(code):
     return re.sub(r"(?<![\w.])(\d+\.\d*(?:[eE][+-]?\d+)?f?|\d+u?)\.([xyzw]{1,4}|[rgba]{1,4})\b", r"(\1).\2", code)
 
@@ -477,7 +490,7 @@ def _convert(preset, options, wd):
 
         for stage, ns in ((info.vs, f"P{k}_V"), (info.fs, f"P{k}_F")):
             body = stage.body
-            body = replace_identifiers(body, uniform_map(stage))
+            body = _clamp_param_indices(replace_identifiers(body, uniform_map(stage)))
             body = _fix_literal_swizzles(rename_reserved(body))
             main = _fix_literal_swizzles(rename_reserved(stage.main_body))
             w(f"namespace {ns}")

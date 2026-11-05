@@ -9,6 +9,29 @@ class PresetError(Exception):
     pass
 
 
+def resolve_ci(path):
+    """Case-insensitive path lookup (presets are often authored on Windows)."""
+    if os.path.exists(path):
+        return path
+    parts = os.path.normpath(path).split(os.sep)
+    cur = os.sep if path.startswith(os.sep) else "."
+    for part in parts:
+        if not part:
+            continue
+        nxt = os.path.join(cur, part)
+        if not os.path.exists(nxt):
+            try:
+                low = part.lower()
+                match = next((e for e in os.listdir(cur) if e.lower() == low), None)
+            except OSError:
+                match = None
+            if match is None:
+                return path
+            nxt = os.path.join(cur, match)
+        cur = nxt
+    return cur
+
+
 def _read_kv(path):
     """Read a .slangp file into (dict, list_of_references)."""
     values = {}
@@ -18,7 +41,7 @@ def _read_kv(path):
             line = raw.strip()
             m = re.match(r'#reference\s+"?([^"]+)"?', line)
             if m:
-                refs.append(os.path.normpath(os.path.join(os.path.dirname(path), m.group(1).strip())))
+                refs.append(resolve_ci(os.path.normpath(os.path.join(os.path.dirname(path), m.group(1).strip()))))
                 continue
             if line.startswith("#") or line.startswith("//"):
                 continue
@@ -86,7 +109,7 @@ class Preset:
 
         def getpath(k):
             v, base = kv[k]
-            return os.path.normpath(os.path.join(base, v))
+            return resolve_ci(os.path.normpath(os.path.join(base, v.replace("\\", "/"))))
 
         def getbool(k, default=False):
             v = get(k)
@@ -187,7 +210,7 @@ class SlangSource:
             for line in f:
                 m = re.match(r'\s*#include\s+"(.+)"', line)
                 if m:
-                    out += self._load(os.path.join(os.path.dirname(path), m.group(1)), depth + 1)
+                    out += self._load(resolve_ci(os.path.join(os.path.dirname(path), m.group(1))), depth + 1)
                 else:
                     out.append(line.rstrip("\n").rstrip("\r"))
         return out

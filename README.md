@@ -1,10 +1,10 @@
-# SlangDeck
+# DeckGlass
 
 Decky-Plugin, das **RetroArch-Shader (Slang-Presets)** auf das gesamte Spielbild des Steam Deck legt – für jedes Spiel und jeden Emulator, nicht nur in RetroArch. Inspiriert von [ShaderGlass](https://github.com/mausimus/ShaderGlass), aufgebaut auf [Reshadeck](https://github.com/safijari/Reshadeck).
 
 ## Funktionsweise
 
-gamescope kann ReShade-Effekte (`.fx`) auf das Bild des laufenden Spiels anwenden. SlangDeck wandelt RetroArch-Presets (`.slangp`) direkt auf dem Deck in einen solchen Effekt um:
+gamescope kann ReShade-Effekte (`.fx`) auf das Bild des laufenden Spiels anwenden. DeckGlass wandelt RetroArch-Presets (`.slangp`) direkt auf dem Deck in einen solchen Effekt um:
 
 ```
 .slangp/.slang ─► glslang ─► SPIR-V ─► SPIRV-Cross (HLSL) ─► slangfx ─► eine ReShade-.fx
@@ -16,8 +16,9 @@ gamescope kann ReShade-Effekte (`.fx`) auf das Bild des laufenden Spiels anwende
 
 ## Shader
 
+- **Retro Crisis:** die [Retro Crisis GDV-NTSC](https://github.com/RetroCrisis/Retro-Crisis-GDV-NTSC)-Presets (GPL-3), inklusive des Ordners „720p Steam Deck“.
 - **RetroArch:** die [libretro slang-shaders](https://github.com/libretro/slang-shaders) (ohne Mega Bezel).
-- **Eigene:** beliebige Slang-Presets nach `~/slangdeck-shaders/` kopieren (Ordnerstruktur mit `#include`s und Texturen beibehalten).
+- **Eigene:** beliebige Slang-Presets nach `~/deckglass-shaders/` kopieren (Ordnerstruktur mit `#include`s und Texturen beibehalten).
 
 ## Einschränkungen
 
@@ -29,10 +30,10 @@ gamescope kann ReShade-Effekte (`.fx`) auf das Bild des laufenden Spiels anwende
 
 ```bash
 pnpm install
-./package.sh /pfad/zu/slang-shaders [/pfad/zu/retro-crisis]
+./package.sh /pfad/zu/slang-shaders [/pfad/zum/entpackten/retro-crisis-release]
 ```
 
-Ergebnis: `out/SlangDeck-<version>.zip`, installierbar über Decky (Entwicklermodus → „Install Plugin from ZIP“).
+Ergebnis: `out/DeckGlass-<version>.zip`, installierbar über Decky (Entwicklermodus → „Install Plugin from ZIP“).
 
 ## Lizenz
 
