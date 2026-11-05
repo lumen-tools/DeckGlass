@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import hashlib
 import json
 import os
@@ -75,7 +76,10 @@ DEFAULT_SETTINGS = {
     "pixel_size": 3.0,
     "params": {},            # preset key -> {name: value}
     "only_in_game": True,    # keep the Steam UI untouched
+    "profiles": {},          # Steam app id -> per-game copy of PROFILE_KEYS (+ "name")
 }
+# Settings that a per-game profile overrides. "only_in_game" stays global.
+PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "params")
 
 
 def _xprop_set(value):
@@ -111,10 +115,10 @@ def _gamescope_pids():
     return pids
 
 
-def _write_guard(fx, pids):
+def _write_guard(fx, pids, app_id=None):
     os.makedirs(SETTINGS_DIR, exist_ok=True)
     with open(GUARD_FILE, "w") as f:
-        json.dump({"fx": fx, "pids": sorted(pids)}, f)
+        json.dump({"fx": fx, "pids": sorted(pids), "app_id": app_id}, f)
 
 
 def _clear_guard():
@@ -130,7 +134,15 @@ class Plugin:
     lock = None
     last_error = None
     in_game = False
+    app_id = None      # Steam app id of the running game (string)
+    app_name = None
     guard_task = None
+
+    @staticmethod
+    def _active():
+        """The settings in effect: the running game's profile, or the global settings."""
+        prof = Plugin.settings.get("profiles", {}).get(Plugin.app_id) if Plugin.app_id else None
+        return prof if prof is not None else Plugin.settings
 
     # ------------------------------------------------------------------ settings
     @staticmethod
@@ -190,12 +202,21 @@ class Plugin:
         return SYSTEMS
 
     async def get_settings(self):
-        return {**Plugin.settings, "last_error": Plugin.last_error}
+        a = Plugin._active()
+        res = {k: a.get(k, DEFAULT_SETTINGS[k]) for k in PROFILE_KEYS if k != "params"}
+        res.update({
+            "only_in_game": Plugin.settings.get("only_in_game", True),
+            "last_error": Plugin.last_error,
+            "app_id": Plugin.app_id,
+            "app_name": Plugin.app_name,
+            "profile_active": a is not Plugin.settings,
+        })
+        return res
 
     # ------------------------------------------------------------------ apply
     @staticmethod
     def _options(key):
-        s = Plugin.settings
+        s = Plugin._active()
         params = s.get("params", {}).get(key, {})
         if s.get("scale_mode") == "manual":
             return Options(pixel_size=float(s.get("pixel_size") or 1.0), params=params)
@@ -236,8 +257,9 @@ class Plugin:
     @staticmethod
     async def _apply():
         """Convert the selected preset (if enabled) and hand it to gamescope."""
-        s = Plugin.settings
-        if not s.get("enabled") or not s.get("preset") or (s.get("only_in_game") and not Plugin.in_game):
+        s = Plugin._active()
+        only_in_game = Plugin.settings.get("only_in_game", True)
+        if not s.get("enabled") or not s.get("preset") or (only_in_game and not Plugin.in_game):
             _xprop_set(None)
             Plugin.current_fx = None
             _clear_guard()
@@ -263,7 +285,7 @@ class Plugin:
             return {"ok": False, "error": Plugin.last_error, "params": []}
         if name != Plugin.current_fx:
             pids = _gamescope_pids()
-            _write_guard(name, pids)
+            _write_guard(name, pids, Plugin.app_id if Plugin._active() is not Plugin.settings else None)
             _xprop_set(name)
             if Plugin.guard_task:
                 Plugin.guard_task.cancel()
@@ -283,7 +305,7 @@ class Plugin:
         if pids_before and not pids_before <= _gamescope_pids():
             logger.error(f"gamescope restarted after setting {fx}; disabling shader")
             async with Plugin.lock:
-                Plugin.settings["enabled"] = False
+                Plugin._active()["enabled"] = False
                 Plugin._save()
                 Plugin.last_error = CRASH_MESSAGE
                 Plugin.current_fx = None
@@ -295,29 +317,52 @@ class Plugin:
         async with Plugin.lock:
             if changes.get("enabled") or "preset" in changes:
                 Plugin.last_error = None
-            for k in ("enabled", "preset", "scale_mode", "system", "pixel_size", "only_in_game"):
+            target = Plugin._active()
+            for k in ("enabled", "preset", "scale_mode", "system", "pixel_size"):
                 if k in changes:
-                    Plugin.settings[k] = changes[k]
+                    target[k] = changes[k]
+            if "only_in_game" in changes:
+                Plugin.settings["only_in_game"] = bool(changes["only_in_game"])
             Plugin._save()
             return await Plugin._apply()
 
     async def set_param(self, preset, name, value):
         async with Plugin.lock:
-            Plugin.settings.setdefault("params", {}).setdefault(preset, {})[name] = float(value)
+            Plugin._active().setdefault("params", {}).setdefault(preset, {})[name] = float(value)
             Plugin._save()
             return await Plugin._apply()
 
     async def reset_params(self, preset):
         async with Plugin.lock:
-            Plugin.settings.setdefault("params", {}).pop(preset, None)
+            Plugin._active().setdefault("params", {}).pop(preset, None)
             Plugin._save()
             return await Plugin._apply()
 
-    async def set_in_game(self, running):
+    async def set_in_game(self, running, app_id=None, app_name=None):
+        """Called by the frontend whenever the running game changes."""
+        app_id = str(app_id) if running and app_id not in (None, "", 0, "0") else None
         async with Plugin.lock:
-            if bool(running) == Plugin.in_game:
+            if bool(running) == Plugin.in_game and app_id == Plugin.app_id:
                 return {"ok": True, "params": []}
             Plugin.in_game = bool(running)
+            Plugin.app_id = app_id
+            Plugin.app_name = app_name if app_id else None
+            return await Plugin._apply()
+
+    async def set_profile(self, enabled):
+        """Per-game switch: on = store the current settings for the running game."""
+        async with Plugin.lock:
+            if not Plugin.app_id:
+                return {"ok": False, "error": "Kein Spiel läuft", "params": []}
+            profiles = Plugin.settings.setdefault("profiles", {})
+            if enabled:
+                if Plugin.app_id not in profiles:
+                    prof = {k: copy.deepcopy(Plugin.settings.get(k, DEFAULT_SETTINGS[k])) for k in PROFILE_KEYS}
+                    prof["name"] = Plugin.app_name
+                    profiles[Plugin.app_id] = prof
+            else:
+                profiles.pop(Plugin.app_id, None)
+            Plugin._save()
             return await Plugin._apply()
 
     async def reapply(self):
@@ -337,10 +382,21 @@ class Plugin:
         await Plugin._load()
         if os.path.exists(GUARD_FILE):
             logger.error("previous shader did not survive; starting with shader disabled")
-            Plugin.settings["enabled"] = False
+            try:
+                with open(GUARD_FILE) as f:
+                    crashed_app = json.load(f).get("app_id")
+            except Exception:
+                crashed_app = None
+            prof = Plugin.settings.get("profiles", {}).get(crashed_app) if crashed_app else None
+            (prof if prof is not None else Plugin.settings)["enabled"] = False
             Plugin._save()
             Plugin.last_error = CRASH_MESSAGE
             _clear_guard()
+        # A globally applied shader (also on the Steam UI) starts switched off after a
+        # restart, so a too coarse setting can never lock the user out.
+        if not Plugin.settings.get("only_in_game", True) and Plugin.settings.get("enabled"):
+            Plugin.settings["enabled"] = False
+            Plugin._save()
         async with Plugin.lock:
             await Plugin._apply()
         logger.info("DeckGlass ready")

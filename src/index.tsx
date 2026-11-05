@@ -26,6 +26,9 @@ type Settings = {
   pixel_size: number;
   only_in_game: boolean;
   last_error: string | null;
+  app_id: string | null;
+  app_name: string | null;
+  profile_active: boolean;
 };
 type ApplyResult = { ok: boolean; error?: string; warning?: string | null; params: Param[] };
 
@@ -36,13 +39,13 @@ const updateSettings = callable<[Partial<Settings>], ApplyResult>("update_settin
 const setParam = callable<[string, string, number], ApplyResult>("set_param");
 const resetParams = callable<[string], ApplyResult>("reset_params");
 const reapply = callable<[], ApplyResult>("reapply");
-const setInGame = callable<[boolean], ApplyResult>("set_in_game");
+const setInGame = callable<[boolean, string | null, string | null], ApplyResult>("set_in_game");
+const setProfile = callable<[boolean], ApplyResult>("set_profile");
 
-declare global {
-  interface Window {
-    SteamClient: any;
-  }
-}
+// Browsing state lives outside the component: Decky may remount the panel (for
+// example when a dropdown menu closes), which would otherwise reset the selection.
+const browse: { lib: string | null; folder: string | null } = { lib: null, folder: null };
+
 
 const MANUAL = "__manual__";
 
@@ -63,8 +66,16 @@ function Content() {
   const [library, setLibrary] = useState<Library[]>([]);
   const [systems, setSystems] = useState<System[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [lib, setLib] = useState<string>("");
-  const [folder, setFolder] = useState<string>("");
+  const [lib, setLibState] = useState<string>(browse.lib ?? "");
+  const [folder, setFolderState] = useState<string>(browse.folder ?? "");
+  const setLib = (v: string) => {
+    browse.lib = v;
+    setLibState(v);
+  };
+  const setFolder = (v: string) => {
+    browse.folder = v;
+    setFolderState(v);
+  };
   const [params, setParams] = useState<Param[]>([]);
   const [showParams, setShowParams] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,19 +98,25 @@ function Content() {
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      const [l, s, st] = await Promise.all([getLibrary(), getSystems(), getSettings()]);
-      setLibrary(l);
-      setSystems(s);
-      setSettings(st);
+  const loadSettings = async (l: Library[]) => {
+    const st = await getSettings();
+    setSettings(st);
+    if (browse.lib === null || !l.some((x) => x.library === browse.lib)) {
       const sk = splitKey(st.preset);
       const firstLib = sk?.library ?? l[0]?.library ?? "";
       setLib(firstLib);
-      const libObj = l.find((x) => x.library === firstLib);
-      setFolder(sk?.folder ?? preferredFolder(libObj));
-      setError(st.last_error);
-      if (st.preset) await run(() => reapply());
+      setFolder(sk?.folder ?? preferredFolder(l.find((x) => x.library === firstLib)));
+    }
+    setError(st.last_error);
+    if (st.preset) await run(() => reapply());
+  };
+
+  useEffect(() => {
+    (async () => {
+      const [l, s] = await Promise.all([getLibrary(), getSystems()]);
+      setLibrary(l);
+      setSystems(s);
+      await loadSettings(l);
     })();
   }, []);
 
@@ -175,6 +192,27 @@ function Content() {
           </PanelSectionRow>
         )}
       </PanelSection>
+
+      {settings.app_id && (
+        <PanelSection title="Spielprofil">
+          <PanelSectionRow>
+            <ToggleField
+              label="Pro Spiel"
+              description={
+                settings.profile_active
+                  ? `Einstellungen gelten nur für ${settings.app_name ?? "dieses Spiel"}`
+                  : `Globale Einstellungen – einschalten, um ${settings.app_name ?? "dieses Spiel"} eigene zu geben`
+              }
+              checked={settings.profile_active}
+              disabled={busy}
+              onChange={async (v) => {
+                await run(() => setProfile(v));
+                await loadSettings(library);
+              }}
+            />
+          </PanelSectionRow>
+        </PanelSection>
+      )}
 
       <PanelSection title="Shader">
         <PanelSectionRow>
@@ -273,9 +311,12 @@ function Content() {
 
 export default definePlugin(() => {
   // Tell the backend whether a game is running, so the Steam UI can stay unshaded.
-  const report = () => setInGame(!!Router.MainRunningApp).catch(() => {});
+  const report = () => {
+    const app = Router.MainRunningApp as any;
+    return setInGame(!!app, app ? String(app.appid) : null, app?.display_name ?? null).catch(() => {});
+  };
   report();
-  const reg = window.SteamClient?.GameSessions?.RegisterForAppLifetimeNotifications?.(() => {
+  const reg = (window as any).SteamClient?.GameSessions?.RegisterForAppLifetimeNotifications?.(() => {
     setTimeout(report, 500);
   });
   return {
