@@ -1,6 +1,6 @@
 # DeckGlass
 
-> **Beta:** works well in testing, but expect rough edges. Please report problems via GitHub issues.
+> **Early release (0.x):** works well in testing, but not 1.0 yet – expect rough edges and please report problems via GitHub issues.
 
 A Decky plugin that puts **RetroArch shaders (slang presets)** on top of the whole game image on the Steam Deck – for every game and emulator, not just inside RetroArch. Inspired by [ShaderGlass](https://github.com/mausimus/ShaderGlass), built on [Reshadeck](https://github.com/safijari/Reshadeck).
 
@@ -18,10 +18,11 @@ gamescope can apply ReShade effects (`.fx`) to the image of the running game. De
 
 ## Shaders
 
-Presets are picked in a file browser, like in RetroArch, with two top folders:
+Presets are picked in a file browser, like in RetroArch, with three top folders:
 
 - **RetroArch:** the [libretro slang-shaders](https://github.com/libretro/slang-shaders). Mega Bezel, HDR shaders, test patterns and source-only folders are hidden.
 - **RetroCrisis:** the [Retro Crisis GDV-NTSC](https://github.com/RetroCrisis/Retro-Crisis-GDV-NTSC) presets (GPL-3), including the "720p Steam Deck" folder.
+- **Custom:** your own presets. Copy them – with their folders – to `~/deckglass-shaders` (e.g. in desktop mode), then reopen the browser. Presets that point to RetroArch's shader folder (`shaders_slang/...`), such as presets saved in RetroArch or a newer Retro Crisis release, find those files in the bundled libretro shaders automatically.
 
 ## Usage
 
@@ -41,7 +42,7 @@ Presets are picked in a file browser, like in RetroArch, with two top folders:
 
 ## Releases
 
-Raising `version` in `package.json` on `main` (together with `release-notes/<version>.md`) makes GitHub Actions build the zip and publish "Version <version>"; 0.x versions are marked as pre-releases.
+Raising `version` in `package.json` on `main` (together with `release-notes/<version>.md`) makes GitHub Actions build the zip and publish "Version <version>". Versions with a suffix (e.g. `0.3.0-beta`) are marked as pre-releases.
 
 ## Building
 

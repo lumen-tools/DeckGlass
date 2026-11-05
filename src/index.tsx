@@ -65,6 +65,7 @@ const resetParams = callable<[string], ApplyResult>("reset_params");
 const reapply = callable<[], ApplyResult>("reapply");
 const setInGame = callable<[boolean, string | null, string | null], ApplyResult>("set_in_game");
 const setProfile = callable<[boolean], ApplyResult>("set_profile");
+const getCustomDir = callable<[], string>("get_custom_dir");
 
 // The side panel listens here so dialogs can tell it to refresh.
 const listeners = new Set<() => void>();
@@ -121,6 +122,10 @@ const subtitleStyle = { fontSize: "13px", opacity: 0.7, marginBottom: "10px" };
 
 function Browser({ root, current, closeModal }: { root: Folder; current: string | null; closeModal?: () => void }) {
   const [path, setPath] = useState<string[]>(() => pathOf(root, current));
+  const [customDir, setCustomDir] = useState<string>("~/deckglass-shaders");
+  useEffect(() => {
+    getCustomDir().then(setCustomDir).catch(() => {});
+  }, []);
   const folder = folderAt(root, path);
 
   const choose = async (key: string) => {
@@ -151,7 +156,11 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
           </DialogButton>
         ))}
         {folder.folders.length === 0 && folder.presets.length === 0 && (
-          <div style={{ opacity: 0.7, padding: "8px" }}>This folder is empty.</div>
+          <div style={{ opacity: 0.7, padding: "8px", wordBreak: "break-word" }}>
+            {path.length === 1 && path[0] === "Custom"
+              ? `No presets yet. Copy slang presets (.slangp) with their folders to ${customDir} – for example an unpacked Retro Crisis release. Then reopen this dialog.`
+              : "This folder is empty."}
+          </div>
         )}
       </Focusable>
     </ModalRoot>
@@ -378,7 +387,12 @@ function Content() {
           <ButtonItem
             layout="below"
             disabled={busy}
-            onClick={() => showModal(<Browser root={library} current={settings.preset} />)}
+            onClick={async () => {
+              // re-scan so presets copied into the Custom folder show up right away
+              const fresh = await getLibrary().catch(() => library);
+              setLibrary(fresh);
+              showModal(<Browser root={fresh} current={settings.preset} />);
+            }}
           >
             Choose Preset …
           </ButtonItem>

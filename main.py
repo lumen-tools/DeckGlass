@@ -15,6 +15,7 @@ sys.path.insert(0, PLUGIN_DIR)
 
 from slangfx import convert, Options, ConvertError  # noqa: E402
 from slangfx import build as slangfx_build  # noqa: E402
+from slangfx import preset as slangfx_preset  # noqa: E402
 
 logger = decky.logger
 
@@ -35,9 +36,14 @@ CRASH_MESSAGE = ("gamescope crashed with this shader, so it was turned off. "
 
 # Shader libraries: bundled ones plus a user folder for own presets.
 # Layout mirrors RetroArch, so Retro Crisis' "../../../shaders_slang/..." paths resolve.
+BUNDLED_SLANG = os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")
+# Own presets: copy them (with their folders) here. References to RetroArch's shader
+# folder ("shaders_slang/...") are found in the bundled libretro shaders.
+CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")
 LIBRARIES = [
-    ("RetroArch", os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")),
+    ("RetroArch", BUNDLED_SLANG),
     ("RetroCrisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
+    ("Custom", CUSTOM_DIR),
 ]
 
 # Native resolutions of common systems, with the pixel size used for them. What counts
@@ -257,6 +263,9 @@ class Plugin:
                     return path
         return None
 
+    async def get_custom_dir(self):
+        return CUSTOM_DIR
+
     async def get_library(self):
         """Preset tree for the file browser: libraries are the top-level folders."""
         return await asyncio.to_thread(_build_library)
@@ -462,6 +471,11 @@ class Plugin:
     # ------------------------------------------------------------------ lifecycle
     async def _main(self):
         Plugin.lock = asyncio.Lock()
+        slangfx_preset.FALLBACK_ROOTS[:] = [BUNDLED_SLANG]
+        try:
+            os.makedirs(CUSTOM_DIR, exist_ok=True)
+        except OSError:
+            logger.exception("could not create custom shader folder")
         for tool in ("glslang", "spirv-cross"):
             p = os.path.join(PLUGIN_DIR, "slangfx", "bin", tool)
             try:

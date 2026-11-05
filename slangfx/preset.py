@@ -9,7 +9,36 @@ class PresetError(Exception):
     pass
 
 
+# Shader libraries to fall back on when a preset points to a file that is not where it
+# expects it, e.g. Retro Crisis copied somewhere else still referencing
+# "../../../shaders_slang/crt/shaders/guest/...". Set by the plugin.
+FALLBACK_ROOTS = []
+
+
 def resolve_ci(path):
+    """Find a referenced file: as written, case-insensitively, or inside a fallback
+    library (by the longest matching tail of the path)."""
+    found = _resolve_case(path)
+    if os.path.exists(found):
+        return found
+    parts = [p for p in os.path.normpath(path).split(os.sep) if p and p not in (".", "..")]
+    for root in FALLBACK_ROOTS:
+        # try ".../shaders_slang/<rest>" first, then ever shorter tails (at least 2 parts)
+        tails = []
+        lowered = [p.lower() for p in parts]
+        if "shaders_slang" in lowered:
+            tails.append(parts[len(lowered) - 1 - lowered[::-1].index("shaders_slang") + 1:])
+        tails += [parts[i:] for i in range(len(parts) - 1) if len(parts) - i >= 2]
+        for tail in tails:
+            if not tail:
+                continue
+            cand = _resolve_case(os.path.join(root, *tail))
+            if os.path.exists(cand):
+                return cand
+    return path
+
+
+def _resolve_case(path):
     """Case-insensitive path lookup (presets are often authored on Windows)."""
     if os.path.exists(path):
         return path
