@@ -30,8 +30,8 @@ CACHE_DIR = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "cache")
 # Crash guard: exists while a freshly set shader has not yet proven stable.
 GUARD_FILE = os.path.join(SETTINGS_DIR, "pending_shader.json")
 GUARD_SECONDS = 8
-CRASH_MESSAGE = ("gamescope ist mit diesem Shader abgestürzt. Der Shader wurde deaktiviert. "
-                 "Bitte ein anderes Preset wählen oder die Logs melden.")
+CRASH_MESSAGE = ("gamescope crashed with this shader, so it was turned off. "
+                 "Please pick another preset or report the logs.")
 
 # Shader libraries: bundled ones plus a user folder for own presets.
 # Layout mirrors RetroArch, so Retro Crisis' "../../../shaders_slang/..." paths resolve.
@@ -58,7 +58,7 @@ SYSTEMS = [
     {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224},
     {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144},
     {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160},
-    {"id": "nds", "label": "Nintendo DS (ein Bildschirm)", "w": 256, "h": 192},
+    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192},
     {"id": "psp", "label": "PSP", "w": 480, "h": 272},
     {"id": "gg", "label": "Game Gear", "w": 160, "h": 144},
     {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152},
@@ -277,7 +277,7 @@ class Plugin:
     def _build(key):
         path = Plugin._resolve_preset(key)
         if not path:
-            raise ConvertError("Voreinstellung nicht gefunden")
+            raise ConvertError("Preset not found")
         opts = Plugin._options(key)
         tag = hashlib.sha1(key.encode()).hexdigest()[:10]
         opts.lut_dir = f"{LUT_ROOT}/{tag}"
@@ -326,11 +326,11 @@ class Plugin:
         try:
             name, plist = await asyncio.to_thread(Plugin._build, key)
         except ConvertError as e:
-            Plugin.last_error = f"Umwandlung fehlgeschlagen: {e}"
+            Plugin.last_error = f"Conversion failed: {e}"
             logger.error(f"convert {key}: {e}")
             return {"ok": False, "error": Plugin.last_error, "params": []}
         except Exception as e:
-            Plugin.last_error = f"Interner Fehler ({type(e).__name__}): {e}"
+            Plugin.last_error = f"Internal error ({type(e).__name__}): {e}"
             logger.exception(f"convert {key}")
             return {"ok": False, "error": Plugin.last_error, "params": []}
         if name != Plugin.current_fx:
@@ -403,7 +403,7 @@ class Plugin:
         """Per-game switch: on = store the current settings for the running game."""
         async with Plugin.lock:
             if not Plugin.app_id:
-                return {"ok": False, "error": "Kein Spiel läuft", "params": []}
+                return {"ok": False, "error": "No game is running", "params": []}
             profiles = Plugin.settings.setdefault("profiles", {})
             if enabled:
                 if Plugin.app_id not in profiles:

@@ -81,7 +81,7 @@ function folderAt(root: Folder, path: string[]): Folder {
 }
 
 function presetLabel(root: Folder | null, key: string | null): string {
-  if (!root || !key) return "Keine ausgewählt";
+  if (!root || !key) return "None selected";
   const p = folderAt(root, pathOf(root, key)).presets.find((x) => x.key === key);
   return p ? p.label : key.split("/").pop()!.replace(/\.slangp$/i, "");
 }
@@ -113,12 +113,12 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
 
   return (
     <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
-      <div style={titleStyle}>Voreinstellung wählen</div>
-      <div style={subtitleStyle}>{path.length ? path.join(" › ") : "Übersicht"}</div>
+      <div style={titleStyle}>Choose Preset</div>
+      <div style={subtitleStyle}>{path.length ? path.join(" › ") : "All shaders"}</div>
       <Focusable style={{ maxHeight: "60vh", overflowY: "auto", display: "flex", flexDirection: "column" }}>
         {path.length > 0 && (
           <DialogButton style={rowStyle} onClick={() => setPath(path.slice(0, -1))}>
-            ‹  Zurück
+            ‹  Back
           </DialogButton>
         )}
         {folder.folders.map((f) => (
@@ -133,7 +133,7 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
           </DialogButton>
         ))}
         {folder.folders.length === 0 && folder.presets.length === 0 && (
-          <div style={{ opacity: 0.7, padding: "8px" }}>Dieser Ordner ist leer.</div>
+          <div style={{ opacity: 0.7, padding: "8px" }}>This folder is empty.</div>
         )}
       </Focusable>
     </ModalRoot>
@@ -152,7 +152,7 @@ function ParamDialog({ preset, title, closeModal }: { preset: string; title: str
   }, []);
 
   const handle = (r: ApplyResult) => {
-    setError(r.ok ? r.warning ?? null : r.error ?? "Unbekannter Fehler");
+    setError(r.ok ? r.warning ?? null : r.error ?? "Unknown error");
     notifyChanged();
   };
 
@@ -164,12 +164,12 @@ function ParamDialog({ preset, title, closeModal }: { preset: string; title: str
 
   return (
     <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
-      <div style={titleStyle}>Parameter</div>
+      <div style={titleStyle}>Parameters</div>
       <div style={subtitleStyle}>{title}</div>
       {error && <div style={{ color: "#ff7070", fontSize: "13px", marginBottom: "8px" }}>{error}</div>}
       <Focusable style={{ maxHeight: "60vh", overflowY: "auto" }}>
-        {params === null && <div>Lade …</div>}
-        {params !== null && params.length === 0 && <div>Diese Voreinstellung hat keine Parameter.</div>}
+        {params === null && <div>Loading …</div>}
+        {params !== null && params.length === 0 && <div>This preset has no parameters.</div>}
         {params !== null && params.length > 0 && (
           <DialogButton
             style={{ marginBottom: "8px" }}
@@ -178,7 +178,7 @@ function ParamDialog({ preset, title, closeModal }: { preset: string; title: str
               setParams(await getParams());
             }}
           >
-            Alle auf Standard zurücksetzen
+            Reset all to defaults
           </DialogButton>
         )}
         {(params ?? []).map((p) =>
@@ -220,7 +220,7 @@ function Content() {
     setBusy(true);
     try {
       const r = await fn();
-      setError(r.ok ? r.warning ?? null : r.error ?? "Unbekannter Fehler");
+      setError(r.ok ? r.warning ?? null : r.error ?? "Unknown error");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -260,7 +260,7 @@ function Content() {
   const scaleOptions: DropdownOption[] = useMemo(
     () => [
       ...systems.map((s) => ({ data: s.id, label: `${s.label} (${s.w}×${s.h})` })),
-      { data: MANUAL, label: "Manuell (Pixelgröße)" },
+      { data: MANUAL, label: "Manual (pixel size)" },
     ],
     [systems]
   );
@@ -268,7 +268,7 @@ function Content() {
   if (!settings || !library) {
     return (
       <PanelSection>
-        <PanelSectionRow>Lade …</PanelSectionRow>
+        <PanelSectionRow>Loading …</PanelSectionRow>
       </PanelSection>
     );
   }
@@ -281,7 +281,7 @@ function Content() {
       <PanelSection>
         <PanelSectionRow>
           <ToggleField
-            label="Shader aktiv"
+            label="Enable shader"
             checked={settings.enabled}
             disabled={busy || !settings.preset}
             onChange={(v) => change({ enabled: v })}
@@ -289,8 +289,8 @@ function Content() {
         </PanelSectionRow>
         <PanelSectionRow>
           <ToggleField
-            label="Nur im Spiel"
-            description="Steam-Menüs bleiben ohne Shader"
+            label="Only in games"
+            description="Keep the Steam menus unshaded"
             checked={settings.only_in_game}
             disabled={busy}
             onChange={(v) => change({ only_in_game: v })}
@@ -298,7 +298,7 @@ function Content() {
         </PanelSectionRow>
         {busy && (
           <PanelSectionRow>
-            <div style={{ fontSize: "12px", opacity: 0.8 }}>Shader wird umgewandelt …</div>
+            <div style={{ fontSize: "12px", opacity: 0.8 }}>Converting shader …</div>
           </PanelSectionRow>
         )}
         {error && (
@@ -309,14 +309,14 @@ function Content() {
       </PanelSection>
 
       {settings.app_id && (
-        <PanelSection title="Spielprofil">
+        <PanelSection title="Game Profile">
           <PanelSectionRow>
             <ToggleField
-              label="Pro Spiel"
+              label="Per-game settings"
               description={
                 settings.profile_active
-                  ? `Gilt nur für ${settings.app_name ?? "dieses Spiel"}`
-                  : `Einschalten, um ${settings.app_name ?? "diesem Spiel"} eigene Einstellungen zu geben`
+                  ? `Only applies to ${settings.app_name ?? "this game"}`
+                  : `Turn on to give ${settings.app_name ?? "this game"} its own settings`
               }
               checked={settings.profile_active}
               disabled={busy}
@@ -342,7 +342,7 @@ function Content() {
             disabled={busy}
             onClick={() => showModal(<Browser root={library} current={settings.preset} />)}
           >
-            Voreinstellung wählen …
+            Choose Preset …
           </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
@@ -351,15 +351,15 @@ function Content() {
             disabled={busy || !settings.preset}
             onClick={() => settings.preset && showModal(<ParamDialog preset={settings.preset} title={label} />)}
           >
-            Parameter …
+            Parameters …
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
 
-      <PanelSection title="Quellauflösung">
+      <PanelSection title="Source Resolution">
         <PanelSectionRow>
           <Dropdown
-            menuLabel="Quellauflösung"
+            menuLabel="Source Resolution"
             rgOptions={scaleOptions}
             selectedOption={settings.scale_mode === "manual" ? MANUAL : settings.system}
             onChange={(o) =>
@@ -370,8 +370,8 @@ function Content() {
         {settings.scale_mode === "manual" && (
           <PanelSectionRow>
             <SliderField
-              label="Pixelgröße"
-              description="Bildschirmpixel pro Originalpixel"
+              label="Pixel size"
+              description="Screen pixels per original pixel"
               min={1}
               max={8}
               step={0.05}
