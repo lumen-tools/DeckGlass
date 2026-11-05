@@ -32,15 +32,16 @@ jobs:
         run: |
           VERSION=$(jq -r .version package.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release v$VERSION already exists, nothing to do."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
           if [ ! -f "release-notes/$VERSION.md" ]; then
             echo "::error::release-notes/$VERSION.md is missing"
             exit 1
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists – updating its notes only."
+            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" --notes-file "release-notes/$VERSION.md"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
