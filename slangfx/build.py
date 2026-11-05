@@ -96,7 +96,7 @@ _FORMATS = {
     "R16G16B16A16_SFLOAT": ("RGBA16F", False), "R32G32B32A32_SFLOAT": ("RGBA32F", False),
     "R16G16B16A16_UNORM": ("RGBA16", False),
     "R8_UNORM": ("R8", False), "R16_SFLOAT": ("R16F", False), "R32_SFLOAT": ("R32F", False),
-    "R8G8_UNORM": ("RG8", False), "R16G16_SFLOAT": ("RG16F", False), "R32G32_SFLOAT": ("RG32F", False),
+    "R8G8_UNORM": ("RG8", False), "R16G16_SFLOAT": ("RGBA16F", False), "R32G32_SFLOAT": ("RGBA32F", False),
     "R16_UNORM": ("R16", False), "R16G16_UNORM": ("RG16", False),
 }
 
@@ -282,13 +282,8 @@ def _convert(preset, options, wd):
         kind, key = ref
         return kind in ("pass", "fb") and infos[key].srgb
 
-    # mipmaps requested on a pass input
-    mip_textures = set()
-    for info in infos:
-        if info.p.mipmap_input:
-            for ref in info.tex_refs.values():
-                if ref[0] in ("orig", "pass", "fb", "hist"):
-                    mip_textures.add(tex_name(ref))
+    # gamescope only supports textures with a single mip level (it asserts otherwise),
+    # so mipmap_input / LUT mipmaps are ignored.
 
     # ---- parameters ----------------------------------------------------------------------------
     param_values = {}
@@ -333,7 +328,7 @@ def _convert(preset, options, wd):
 
     # textures
     def mip(tn):
-        return " MipLevels = 4;" if tn in mip_textures else ""
+        return ""
 
     w("texture T_BACK : COLOR;")
     w("sampler2D S_BACK { Texture = T_BACK; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };")
@@ -352,8 +347,7 @@ def _convert(preset, options, wd):
         lw, lh = _png_size(lut.path)
         rel = f"{options.lut_dir}/{os.path.basename(lut.path)}"
         lut_files.append((lut.path, rel))
-        lm = " MipLevels = 4;" if lut.mipmap else ""
-        w(f'texture T_LUT_{name} < source = "{rel}"; > {{ Width = {lw}; Height = {lh}; Format = RGBA8;{lm} }};')
+        w(f'texture T_LUT_{name} < source = "{rel}"; > {{ Width = {lw}; Height = {lh}; Format = RGBA8; }};')
     w("")
 
     # shared vertex shader + copy helpers
@@ -467,14 +461,14 @@ def _convert(preset, options, wd):
         def samplers(stage):
             res = []
             filt = "LINEAR" if info.p.filter_linear else "POINT"
-            mipf = "LINEAR" if info.p.mipmap_input else "POINT"
+            mipf = "POINT"
             for t in stage.textures:
                 ref = info.tex_refs[t]
                 if ref[0] == "lut":
                     lut = luts[ref[1]]
                     f = "LINEAR" if lut.filter_linear else "POINT"
                     wrap = _WRAP.get(lut.wrap_mode, "BORDER")
-                    mf = "LINEAR" if lut.mipmap else "POINT"
+                    mf = "POINT"
                     srgb = ""
                 else:
                     f = filt
@@ -563,6 +557,11 @@ def _convert(preset, options, wd):
     # technique
     w("technique SlangFX")
     w("{")
+    # Feedback/history copies run first: the targets still hold the previous frame here,
+    # which is exactly what PassFeedbackN / OriginalHistoryN mean. gamescope displays the
+    # render target of the last pass, so the final image pass must come last.
+    for dst, src, name in copies:
+        w(f"    pass {{ VertexShader = SFX_VS; PixelShader = {name}; RenderTarget = {dst}; }}")
     w("    pass Downsample { VertexShader = SFX_VS; PixelShader = SFX_PS_Down; RenderTarget = T_ORIG; }")
     for info in infos:
         k = info.index
@@ -571,8 +570,6 @@ def _convert(preset, options, wd):
         w(f"    pass P{k} {{ VertexShader = P{k}_V::VS; PixelShader = P{k}_F::PS;{rt}{srgb} }}")
     if not direct:
         w("    pass Blit { VertexShader = SFX_VS; PixelShader = SFX_PS_Blit; }")
-    for dst, src, name in copies:
-        w(f"    pass {{ VertexShader = SFX_VS; PixelShader = {name}; RenderTarget = {dst}; }}")
     w("}")
 
     plist = [{"name": nme, "label": params[nme].label, "default": params[nme].default, "min": params[nme].min,

@@ -27,7 +27,7 @@ type Settings = {
   only_in_game: boolean;
   last_error: string | null;
 };
-type ApplyResult = { ok: boolean; error?: string; params: Param[] };
+type ApplyResult = { ok: boolean; error?: string; warning?: string | null; params: Param[] };
 
 const getLibrary = callable<[], Library[]>("get_library");
 const getSystems = callable<[], System[]>("get_systems");
@@ -72,7 +72,7 @@ function Content() {
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const handle = (r: ApplyResult) => {
-    setError(r.ok ? null : r.error ?? "Unbekannter Fehler");
+    setError(r.ok ? r.warning ?? null : r.error ?? "Unbekannter Fehler");
     setParams(r.params ?? []);
   };
 
@@ -98,8 +98,8 @@ function Content() {
       setLib(firstLib);
       const libObj = l.find((x) => x.library === firstLib);
       setFolder(sk?.folder ?? preferredFolder(libObj));
+      setError(st.last_error);
       if (st.preset) await run(() => reapply());
-      else setError(st.last_error);
     })();
   }, []);
 

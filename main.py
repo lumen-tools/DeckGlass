@@ -26,6 +26,11 @@ LUT_ROOT = "deckglass"
 SETTINGS_DIR = decky.DECKY_PLUGIN_SETTINGS_DIR
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 CACHE_DIR = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "cache")
+# Crash guard: exists while a freshly set shader has not yet proven stable.
+GUARD_FILE = os.path.join(SETTINGS_DIR, "pending_shader.json")
+GUARD_SECONDS = 8
+CRASH_MESSAGE = ("gamescope ist mit diesem Shader abgestürzt. Der Shader wurde deaktiviert. "
+                 "Bitte ein anderes Preset wählen oder die Logs melden.")
 
 # Shader libraries: bundled ones plus a user folder for own presets.
 # Layout mirrors RetroArch, so Retro Crisis' "../../../shaders_slang/..." paths resolve.
@@ -92,12 +97,40 @@ def _xprop_set(value):
     return True
 
 
+def _gamescope_pids():
+    pids = set()
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/comm") as f:
+                if f.read().strip() in ("gamescope", "gamescope-wl"):
+                    pids.add(int(d))
+        except OSError:
+            pass
+    return pids
+
+
+def _write_guard(fx, pids):
+    os.makedirs(SETTINGS_DIR, exist_ok=True)
+    with open(GUARD_FILE, "w") as f:
+        json.dump({"fx": fx, "pids": sorted(pids)}, f)
+
+
+def _clear_guard():
+    try:
+        os.remove(GUARD_FILE)
+    except FileNotFoundError:
+        pass
+
+
 class Plugin:
     settings = dict(DEFAULT_SETTINGS)
     current_fx = None
     lock = None
     last_error = None
     in_game = False
+    guard_task = None
 
     # ------------------------------------------------------------------ settings
     @staticmethod
@@ -207,7 +240,7 @@ class Plugin:
         if not s.get("enabled") or not s.get("preset") or (s.get("only_in_game") and not Plugin.in_game):
             _xprop_set(None)
             Plugin.current_fx = None
-            Plugin.last_error = None
+            _clear_guard()
             plist = []
             path = Plugin._resolve_preset(s.get("preset"))
             if path:
@@ -216,7 +249,7 @@ class Plugin:
                                                     s.get("params", {}).get(s["preset"], {}))
                 except Exception:
                     logger.exception("list parameters")
-            return {"ok": True, "params": plist}
+            return {"ok": True, "params": plist, "warning": Plugin.last_error}
         key = s["preset"]
         try:
             name, plist = await asyncio.to_thread(Plugin._build, key)
@@ -228,15 +261,40 @@ class Plugin:
             Plugin.last_error = f"{type(e).__name__}: {e}"
             logger.exception(f"convert {key}")
             return {"ok": False, "error": Plugin.last_error, "params": []}
-        _xprop_set(name)
+        if name != Plugin.current_fx:
+            pids = _gamescope_pids()
+            _write_guard(name, pids)
+            _xprop_set(name)
+            if Plugin.guard_task:
+                Plugin.guard_task.cancel()
+            Plugin.guard_task = asyncio.create_task(Plugin._watch_guard(name, pids))
         Plugin.current_fx = name
         Plugin.last_error = None
         await asyncio.to_thread(Plugin._cleanup, name)
         return {"ok": True, "params": plist}
 
+    @staticmethod
+    async def _watch_guard(fx, pids_before):
+        """If gamescope dies right after a shader was set, disable the shader."""
+        try:
+            await asyncio.sleep(GUARD_SECONDS)
+        except asyncio.CancelledError:
+            return
+        if pids_before and not pids_before <= _gamescope_pids():
+            logger.error(f"gamescope restarted after setting {fx}; disabling shader")
+            async with Plugin.lock:
+                Plugin.settings["enabled"] = False
+                Plugin._save()
+                Plugin.last_error = CRASH_MESSAGE
+                Plugin.current_fx = None
+                _xprop_set(None)
+        _clear_guard()
+
     async def update_settings(self, changes):
         """Merge changes from the UI, save and re-apply."""
         async with Plugin.lock:
+            if changes.get("enabled") or "preset" in changes:
+                Plugin.last_error = None
             for k in ("enabled", "preset", "scale_mode", "system", "pixel_size", "only_in_game"):
                 if k in changes:
                     Plugin.settings[k] = changes[k]
@@ -277,6 +335,12 @@ class Plugin:
             except OSError:
                 pass
         await Plugin._load()
+        if os.path.exists(GUARD_FILE):
+            logger.error("previous shader did not survive; starting with shader disabled")
+            Plugin.settings["enabled"] = False
+            Plugin._save()
+            Plugin.last_error = CRASH_MESSAGE
+            _clear_guard()
         async with Plugin.lock:
             await Plugin._apply()
         logger.info("DeckGlass ready")
