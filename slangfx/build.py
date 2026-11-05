@@ -179,6 +179,15 @@ def _rewrite_lod_reads(code, sampler, full_chain):
     return out + code[pos:], levels, need_fn
 
 
+def nice_pixel_size(exact):
+    """Nearest of 1, 1.5, 2, 2.5, 3, 4, 5, 6 ... (x.5 above 3 only when exact), ties
+    rounded up: round pixel sizes keep every scanline equally thick."""
+    cands = [1.0, 1.5, 2.0, 2.5] + [float(v) for v in range(3, 13)]
+    if exact >= 3 and abs(exact * 2 - round(exact * 2)) < 1e-6:
+        cands.append(round(exact * 2) / 2)
+    return min(cands, key=lambda c: (abs(c - exact), -c))
+
+
 def _fix_literal_swizzles(code):
     return re.sub(r"(?<![\w.])(\d+\.\d*(?:[eE][+-]?\d+)?f?|\d+u?)\.([xyzw]{1,4}|[rgba]{1,4})\b", r"(\1).\2", code)
 
@@ -412,11 +421,12 @@ def _convert(preset, options, wd):
     w(f"// Preset: {os.path.basename(preset.path)}")
     w("")
     if options.native:
-        # The pixel size is derived from the real size of the game image gamescope hands
-        # over (BUFFER_WIDTH x BUFFER_HEIGHT), so it is right whether the emulator renders
-        # 720 or 800 lines: the source grid gets exactly `nh` lines of game picture.
+        # Round pixel size for the real height of the game picture (BUFFER_HEIGHT, or 720
+        # when the emulator draws bars into a taller picture). Round values keep every
+        # scanline equally thick. The value for each possible height is worked out here
+        # and picked by the preprocessor, because the height is only known to gamescope.
         nw, nh = options.native
-        w(f"// source image: {nw or 'any'}x{nh}, scaled to fit the game picture")
+        w(f"// source: {nw or 'any'}x{nh}, round pixel size for the height of the game picture")
         if options.bars:
             w("#if BUFFER_HEIGHT > 720")
             w("  #define SFX_CONTENT_H 720")
@@ -425,18 +435,20 @@ def _convert(preset, options, wd):
             w("#endif")
         else:
             w("#define SFX_CONTENT_H BUFFER_HEIGHT")
-        if nw:
-            # handhelds: the picture may be limited by the width instead of the height
-            w(f"#if BUFFER_WIDTH * {nh} <= SFX_CONTENT_H * {nw}")
-            w(f"  #define SFX_ORIG_W {nw}")
-            w(f"  #define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nw} + BUFFER_WIDTH) / (2 * BUFFER_WIDTH))")
-            w("#else")
-            w(f"  #define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
-            w(f"  #define SFX_ORIG_W ((BUFFER_WIDTH * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
-            w("#endif")
-        else:
-            w(f"#define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
-            w(f"#define SFX_ORIG_W ((BUFFER_WIDTH * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
+        heights = [360, 400, 480, 540, 576, 600, 720, 768, 800, 900, 1080, 1200, 1440, 1600, 2160]
+        for i, hh in enumerate(heights):
+            ww = 1280 if hh <= 800 else hh * 16 // 9
+            f = nice_pixel_size(min(ww / nw, hh / nh) if nw else hh / nh)
+            if i == len(heights) - 1:
+                cond = "#else"
+            else:
+                limit = (hh + heights[i + 1]) // 2
+                cond = ("#if" if i == 0 else "#elif") + f" SFX_CONTENT_H < {limit}"
+            w(cond)
+            w(f"  // {hh} lines -> {f:g}x")
+            w(f"  #define SFX_ORIG_W {_scale_expr('BUFFER_WIDTH', 1.0 / f)}")
+            w(f"  #define SFX_ORIG_H {_scale_expr('BUFFER_HEIGHT', 1.0 / f)}")
+        w("#endif")
     else:
         ps = options.pixel_size or 1.0
         inv = 1.0 / ps
