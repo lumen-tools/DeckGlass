@@ -494,7 +494,7 @@ function Content() {
               description="Screen pixels per original pixel"
               min={1}
               max={8}
-              step={0.1}
+              step={0.01}
               value={settings.pixel_size}
               showValue
               editableValue
