@@ -22,7 +22,22 @@ import { MdMonitor } from "react-icons/md";
 type Preset = { key: string; label: string };
 type Folder = { name: string; folders: Folder[]; presets: Preset[] };
 type System = { id: string; label: string; w: number; h: number };
-type Param = { name: string; label: string; min: number; max: number; step: number; default: number; value: number };
+type ParamOption = { value: number; label: string };
+type Param = {
+  name: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  value: number;
+  kind: "heading" | "choice" | "slider";
+  options?: ParamOption[];
+};
+
+/** "-1 = Auto · 0 = NO · 1 = YES" */
+const optionLegend = (opts: ParamOption[]) => opts.map((o) => `${o.value} = ${o.label}`).join(" · ");
+const optionName = (p: Param) => p.options?.find((o) => Math.abs(o.value - p.value) < 1e-6)?.label;
 type Settings = {
   enabled: boolean;
   preset: string | null;
@@ -187,15 +202,15 @@ function ParamDialog({ preset, title, closeModal }: { preset: string; title: str
           </DialogButton>
         )}
         {(params ?? []).map((p) =>
-          p.min === p.max ? (
-            // entries such as "[ AFTERGLOW SETTINGS ]" have no range: show them as headings
+          p.kind === "heading" ? (
             <div key={p.name} style={{ marginTop: "12px", fontWeight: "bold", opacity: 0.8 }}>
-              {p.label.replace(/^[\s[\]\-=:*#]+|[\s[\]\-=:*#]+$/g, "")}
+              {p.label}
             </div>
           ) : (
             <SliderField
               key={p.name}
-              label={p.label}
+              label={p.options && optionName(p) ? `${p.label}: ${optionName(p)}` : p.label}
+              description={p.options ? optionLegend(p.options) : undefined}
               min={p.min}
               max={p.max}
               step={p.step > 0 ? p.step : (p.max - p.min) / 100}

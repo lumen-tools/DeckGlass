@@ -643,6 +643,61 @@ def list_parameters(preset_path, user_params=None):
             seen.add(prm.name)
             v = preset.overrides.get(prm.name, prm.default)
             v = float(user_params.get(prm.name, v))
-            res.append({"name": prm.name, "label": prm.label, "default": prm.default, "min": prm.min,
-                        "max": prm.max, "step": prm.step, "value": v})
+            entry = {"name": prm.name, "label": prm.label.strip(), "default": prm.default, "min": prm.min,
+                     "max": prm.max, "step": prm.step, "value": v}
+            entry.update(describe_parameter(prm.label, prm.min, prm.max, prm.step))
+            res.append(entry)
     return res
+
+
+def _is_int(x):
+    return abs(x - round(x)) < 1e-6
+
+
+def describe_parameter(label, lo, hi, step):
+    """Explain integer parameters whose meaning is listed in the label, e.g.
+    "NTSC Merge Fields: Auto | NO | YES" for -1..1. The value stays a number;
+    this only adds names for display. Returns {"kind", "label", "options"}."""
+    text = label.strip()
+    if lo == hi or text.startswith("["):
+        # section titles such as "[ AFTERGLOW SETTINGS ]:" (sometimes with a dummy range)
+        return {"kind": "heading", "label": text.strip("[]:=-*# ").strip() or text}
+    integral = _is_int(lo) and _is_int(hi) and (step <= 0 or _is_int(step)) and hi - lo <= 16
+    if not integral:
+        return {"kind": "slider", "label": text}
+    values = list(range(int(round(lo)), int(round(hi)) + 1, max(1, int(round(step))) if step > 0 else 1))
+
+    def choice(head, names):
+        if len(names) >= 2 and len(names) == len(values) - 1 and values[0] == 0:
+            names = ["Off"] + names  # e.g. "LUT Colors: NTSC-J | Trinit. | ..." for 0..4, where 0 is off
+        if len(names) != len(values) or len(names) < 2:
+            return None
+        return {"kind": "choice", "label": head or text,
+                "options": [{"value": float(x), "label": n} for x, n in zip(values, names)]}
+
+    # 1) explicit "0: name, 1: name" / "0=name" lists
+    explicit = re.findall(r"(-?\d+)\s*[:=]\s*([^,;|()]+?)(?=\s*(?:[,;|)]|-?\d+\s*[:=]|$))", text)
+    if len(explicit) >= 2:
+        names = {int(k): n.strip() for k, n in explicit}
+        if set(names) == set(values):
+            base = re.split(r"\s*[(\[]?\s*-?\d+\s*[:=]", text, maxsplit=1)[0].strip(" :-(")
+            return {"kind": "choice", "label": base or text,
+                    "options": [{"value": float(x), "label": names[x]} for x in values]}
+
+    # 2) "Name: a | b | c", "Name: a, b, c", "Name: a / b", "Name: a or b"
+    m = re.match(r"^(.*?):\s*(.+)$", text)
+    if m:
+        head, tail = m.group(1).strip(), m.group(2).strip()
+        for sep in (r"\s*\|\s*", r"\s*,\s*", r"\s*/\s*", r"\s+or\s+"):
+            parts = [p.strip() for p in re.split(sep, tail) if p.strip()]
+            if all(len(p) <= 24 for p in parts):
+                r = choice(head, parts)
+                if r:
+                    return r
+    # 3) "Name (a/b/c)"
+    m = re.match(r"^(.*?)\s*\(([^()]+)\)\s*$", text)
+    if m:
+        r = choice(m.group(1).strip(), [p.strip() for p in re.split(r"\s*[/|,]\s*", m.group(2)) if p.strip()])
+        if r:
+            return r
+    return {"kind": "slider", "label": text}
