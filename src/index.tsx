@@ -21,7 +21,7 @@ import { MdMonitor } from "react-icons/md";
 
 type Preset = { key: string; label: string };
 type Folder = { name: string; folders: Folder[]; presets: Preset[] };
-type System = { id: string; label: string; w: number; h: number };
+type System = { id: string; label: string; w: number; h: number; px: number };
 type ParamOption = { value: number; label: string };
 type Param = {
   name: string;
@@ -69,10 +69,7 @@ const setProfile = callable<[boolean], ApplyResult>("set_profile");
 const listeners = new Set<() => void>();
 const notifyChanged = () => listeners.forEach((l) => l());
 
-// Deck screen; the pixel size shown per system assumes the game fills it.
-const SCREEN_W = 1280;
-const SCREEN_H = 800;
-const pixelSizeOf = (s: System) => Math.min(SCREEN_W / s.w, SCREEN_H / s.h);
+
 
 // ------------------------------------------------------------------ helpers
 
@@ -285,7 +282,7 @@ function Content() {
     () =>
       systems.map((s) => ({
         data: s.id,
-        label: `${s.label} (${s.w}×${s.h}) – ${pixelSizeOf(s).toFixed(2)}×`,
+        label: `${s.label} (${s.w}×${s.h}) – ${s.px}×`,
       })),
     [systems]
   );
@@ -404,7 +401,7 @@ function Content() {
         {settings.scale_mode === "system" && (
           <PanelSectionRow>
             <Dropdown
-              menuLabel="System (pixel size on the Deck screen)"
+              menuLabel="System (pixel size)"
               rgOptions={systemOptions}
               selectedOption={settings.system}
               onChange={(o) => change({ system: o.data })}

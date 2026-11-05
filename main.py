@@ -40,29 +40,31 @@ LIBRARIES = [
     ("RetroCrisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
 ]
 
-# Native resolutions of common systems. The game image is assumed to be scaled to
-# fit the screen with its aspect ratio kept (no integer scaling).
+# Native resolutions of common systems, with the pixel size used for them. The exact
+# fit on the 1280x800 screen is rarely a round number (SNES: 800/224 = 3.57); a round
+# pixel size keeps every scanline equally thick, which looks much calmer than an exact
+# but fractional one. Values are the nearest of 1.5, 2, 2.5, 3, 4, 5, 6.
 SYSTEMS = [
-    {"id": "nes", "label": "NES / Famicom", "w": 256, "h": 240},
-    {"id": "snes", "label": "SNES", "w": 256, "h": 224},
-    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224},
-    {"id": "sms", "label": "Master System", "w": 256, "h": 192},
-    {"id": "pce", "label": "PC Engine", "w": 256, "h": 232},
-    {"id": "n64", "label": "Nintendo 64", "w": 320, "h": 240},
-    {"id": "psx", "label": "PlayStation", "w": 320, "h": 240},
-    {"id": "psx480", "label": "PlayStation (480i)", "w": 640, "h": 480},
-    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224},
-    {"id": "dc", "label": "Dreamcast", "w": 640, "h": 480},
-    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448},
-    {"id": "gc", "label": "GameCube / Wii", "w": 640, "h": 480},
-    {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224},
-    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144},
-    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160},
-    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192},
-    {"id": "psp", "label": "PSP", "w": 480, "h": 272},
-    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144},
-    {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152},
-    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144},
+    {"id": "nes", "label": "NES / Famicom", "w": 256, "h": 240, "px": 3},
+    {"id": "snes", "label": "SNES", "w": 256, "h": 224, "px": 4},
+    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224, "px": 4},
+    {"id": "sms", "label": "Master System", "w": 256, "h": 192, "px": 4},
+    {"id": "pce", "label": "PC Engine", "w": 256, "h": 232, "px": 3},
+    {"id": "n64", "label": "Nintendo 64", "w": 320, "h": 240, "px": 3},
+    {"id": "psx", "label": "PlayStation", "w": 320, "h": 240, "px": 3},
+    {"id": "psx480", "label": "PlayStation (480i)", "w": 640, "h": 480, "px": 1.5},
+    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224, "px": 4},
+    {"id": "dc", "label": "Dreamcast", "w": 640, "h": 480, "px": 1.5},
+    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448, "px": 2},
+    {"id": "gc", "label": "GameCube / Wii", "w": 640, "h": 480, "px": 1.5},
+    {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224, "px": 3},
+    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144, "px": 6},
+    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160, "px": 5},
+    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192, "px": 4},
+    {"id": "psp", "label": "PSP", "w": 480, "h": 272, "px": 2.5},
+    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144, "px": 6},
+    {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152, "px": 5},
+    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144, "px": 6},
 ]
 SYSTEM_BY_ID = {s["id"]: s for s in SYSTEMS}
 
@@ -295,7 +297,7 @@ class Plugin:
         if s.get("scale_mode") == "manual":
             return Options(pixel_size=float(s.get("pixel_size") or 1.0), params=params)
         sysd = SYSTEM_BY_ID.get(s.get("system"), SYSTEM_BY_ID["snes"])
-        return Options(native=(sysd["w"], sysd["h"]), params=params)
+        return Options(pixel_size=float(sysd["px"]), params=params)
 
     @staticmethod
     def _defringe():
