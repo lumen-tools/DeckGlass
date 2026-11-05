@@ -1,0 +1,88 @@
+name: Release an earlier commit
+
+# Started by hand: builds an earlier commit of main under a new version number
+# and publishes it as an older (non-latest) release. Notes come from
+# release-notes/<version>.md on main.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit to build"
+        required: true
+      version:
+        description: "Version number to publish it as (e.g. 0.5.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  SLANG_SHADERS_REF: 3685eda59ffd2ebe1b12cc4640581dc23552ce88
+  RETRO_CRISIS_TAG: "20260927"
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: main
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: src
+
+      - name: Check inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          test -f "main/release-notes/$VERSION.md" || { echo "::error::main/release-notes/$VERSION.md is missing"; exit 1; }
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release v$VERSION already exists"; exit 1
+          fi
+          # the plugin reports the version from package.json
+          cd src && jq --arg v "$VERSION" '.version = $v' package.json > p.json && mv p.json package.json
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: cd src && pnpm install --frozen-lockfile
+
+      - name: Fetch libretro slang-shaders
+        run: |
+          git init -q "$RUNNER_TEMP/slang-shaders"
+          cd "$RUNNER_TEMP/slang-shaders"
+          git remote add origin https://github.com/libretro/slang-shaders.git
+          git fetch -q --depth 1 origin "$SLANG_SHADERS_REF"
+          git checkout -q FETCH_HEAD
+
+      - name: Fetch Retro Crisis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rc-zip" "$RUNNER_TEMP/rc"
+          gh release download "$RETRO_CRISIS_TAG" --repo RetroCrisis/Retro-Crisis-GDV-NTSC \
+            --pattern '*.zip' --dir "$RUNNER_TEMP/rc-zip"
+          unzip -q "$RUNNER_TEMP"/rc-zip/*.zip -d "$RUNNER_TEMP/rc"
+          test -d "$RUNNER_TEMP/rc/retro crisis"
+          gh api "repos/RetroCrisis/Retro-Crisis-GDV-NTSC/contents/LICENSE?ref=$RETRO_CRISIS_TAG" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/rc/LICENSE"
+
+      - name: Build plugin zip
+        run: cd src && ./package.sh "$RUNNER_TEMP/slang-shaders" "$RUNNER_TEMP/rc"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "v$VERSION" "src/out/DeckGlass-$VERSION.zip" \
+            --repo "$GITHUB_REPOSITORY" --target "$(git -C src rev-parse HEAD)" \
+            --title "Version $VERSION" --notes-file "main/release-notes/$VERSION.md" --latest=false

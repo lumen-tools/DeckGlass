@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       keep:
-        description: "Tag to keep (e.g. v0.3.0)"
+        description: "Tags to keep, separated by spaces (e.g. v0.5.0 v0.6.0 v0.7.0)"
         required: true
 
 permissions:
@@ -20,14 +20,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KEEP: ${{ inputs.keep }}
         run: |
-          gh release view "$KEEP" --repo "$GITHUB_REPOSITORY" >/dev/null || { echo "::error::$KEEP does not exist"; exit 1; }
+          for k in $KEEP; do
+            gh release view "$k" --repo "$GITHUB_REPOSITORY" >/dev/null || { echo "::error::$k does not exist"; exit 1; }
+          done
+          keep() { for k in $KEEP; do [ "$1" = "$k" ] && return 0; done; return 1; }
           for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName'); do
-            [ "$tag" = "$KEEP" ] && continue
+            keep "$tag" && continue
             echo "deleting release $tag"
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
           done
           for tag in $(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" --jq '.[].ref | sub("refs/tags/"; "")'); do
-            [ "$tag" = "$KEEP" ] && continue
+            keep "$tag" && continue
             echo "deleting tag $tag"
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag"
           done
