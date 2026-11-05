@@ -30,6 +30,8 @@ type Settings = {
   system: string;
   pixel_size: number;
   only_in_game: boolean;
+  is_oled: boolean;
+  oled_defringe: boolean;
   last_error: string | null;
   app_id: string | null;
   app_name: string | null;
@@ -304,6 +306,17 @@ function Content() {
             onChange={(v) => change({ only_in_game: v })}
           />
         </PanelSectionRow>
+        {settings.is_oled && (
+          <PanelSectionRow>
+            <ToggleField
+              label="OLED defringe"
+              description="Reduces colour fringing on the Deck OLED screen"
+              checked={settings.oled_defringe}
+              disabled={busy}
+              onChange={(v) => change({ oled_defringe: v })}
+            />
+          </PanelSectionRow>
+        )}
         {busy && (
           <PanelSectionRow>
             <div style={{ fontSize: "12px", opacity: 0.8 }}>Converting shader …</div>

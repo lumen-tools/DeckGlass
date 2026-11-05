@@ -74,6 +74,7 @@ DEFAULT_SETTINGS = {
     "pixel_size": 3.0,
     "params": {},            # preset key -> {name: value}
     "only_in_game": True,    # keep the Steam UI untouched
+    "oled_defringe": False,  # Deck OLED only: reduce colour fringing (device setting, not per game)
     "profiles": {},          # Steam app id -> per-game copy of PROFILE_KEYS (+ "name")
 }
 # Settings that a per-game profile overrides. "only_in_game" stays global.
@@ -150,6 +151,27 @@ def _build_library():
             node = {"name": name, "folders": [], "presets": []}
         libs.append(node)
     return {"name": "", "folders": libs, "presets": []}
+
+
+def _write_fx(fx):
+    digest = hashlib.sha1(fx.encode()).hexdigest()[:12]
+    os.makedirs(SHADERS_DIR, exist_ok=True)
+    name = f"{FX_PREFIX}{digest}.fx"
+    with open(os.path.join(SHADERS_DIR, name), "w") as f:
+        f.write(fx)
+    return name
+
+
+def _is_oled():
+    """Steam Deck OLED reports "Galileo", the LCD model "Jupiter"."""
+    try:
+        with open("/sys/class/dmi/id/product_name") as f:
+            return f.read().strip() == "Galileo"
+    except OSError:
+        return False
+
+
+IS_OLED = _is_oled()
 
 
 def _gamescope_pids():
@@ -256,6 +278,8 @@ class Plugin:
         res = {k: a.get(k, DEFAULT_SETTINGS[k]) for k in PROFILE_KEYS if k != "params"}
         res.update({
             "only_in_game": Plugin.settings.get("only_in_game", True),
+            "is_oled": IS_OLED,
+            "oled_defringe": bool(Plugin.settings.get("oled_defringe")),
             "last_error": Plugin.last_error,
             "app_id": Plugin.app_id,
             "app_name": Plugin.app_name,
@@ -274,20 +298,21 @@ class Plugin:
         return Options(native=(sysd["w"], sysd["h"]), params=params)
 
     @staticmethod
+    def _defringe():
+        return IS_OLED and bool(Plugin.settings.get("oled_defringe"))
+
+    @staticmethod
     def _build(key):
         path = Plugin._resolve_preset(key)
         if not path:
             raise ConvertError("Preset not found")
         opts = Plugin._options(key)
+        opts.defringe = Plugin._defringe()
         tag = hashlib.sha1(key.encode()).hexdigest()[:10]
         opts.lut_dir = f"{LUT_ROOT}/{tag}"
         slangfx_build.CACHE_DIR = CACHE_DIR
         fx, luts, plist = convert(path, opts)
-        digest = hashlib.sha1(fx.encode()).hexdigest()[:12]
-        os.makedirs(SHADERS_DIR, exist_ok=True)
-        name = f"{FX_PREFIX}{digest}.fx"
-        with open(os.path.join(SHADERS_DIR, name), "w") as f:
-            f.write(fx)
+        name = _write_fx(fx)
         for src, rel in luts:
             dst = os.path.join(TEXTURES_DIR, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -310,8 +335,16 @@ class Plugin:
         s = Plugin._active()
         only_in_game = Plugin.settings.get("only_in_game", True)
         if not s.get("enabled") or not s.get("preset") or (only_in_game and not Plugin.in_game):
-            _xprop_set(None)
-            Plugin.current_fx = None
+            if Plugin._defringe():
+                # no retro shader right now, but the OLED defringe still applies everywhere
+                name = _write_fx(slangfx_build.defringe_only_fx())
+                if name != Plugin.current_fx:
+                    _xprop_set(name)
+                    Plugin.current_fx = name
+                await asyncio.to_thread(Plugin._cleanup, name)
+            else:
+                _xprop_set(None)
+                Plugin.current_fx = None
             _clear_guard()
             plist = []
             path = Plugin._resolve_preset(s.get("preset"))
@@ -371,6 +404,8 @@ class Plugin:
             for k in ("enabled", "preset", "scale_mode", "system", "pixel_size"):
                 if k in changes:
                     target[k] = changes[k]
+            if "oled_defringe" in changes:
+                Plugin.settings["oled_defringe"] = bool(changes["oled_defringe"])
             if "only_in_game" in changes:
                 Plugin.settings["only_in_game"] = bool(changes["only_in_game"])
             Plugin._save()

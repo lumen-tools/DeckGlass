@@ -26,10 +26,12 @@ Presets are picked in a file browser, like in RetroArch, with two top folders:
 - **Enable shader / Only in games:** "Only in games" keeps the Steam menus untouched. If it is off, the shader starts disabled after a restart.
 - **Per-game settings:** while a game is running, this switch stores all settings for that game only. When the game quits, the global settings apply again.
 - **Parameters:** a separate dialog with all sliders of the preset.
+- **OLED defringe (Deck OLED only):** the subpixel layout of some Deck OLED screens (Samsung panel) causes slight colour fringing that a small number of people notice. This switch adds a small correction pass – taken from Reshadeck's `DefringSamsungOLEDeck.fx` – on top of any shader, or on its own. It is hidden on the LCD model and off by default.
 - **Crash guard:** if gamescope crashes right after a shader is applied, the shader is turned off – also across restarts.
 
 ## Limitations
 
+- CRT masks (aperture grille, slot mask) are designed for RGB-stripe LCDs and can look tinted on the Deck OLED, just like in RetroArch. Pick a different mask type in the preset parameters if that happens.
 - Screenshots do not include the shader.
 - Heavy presets (e.g. crt-royale) cost a lot of GPU time.
 - A few presets cannot be converted (e.g. matrix ternaries); the error is shown in the plugin.
