@@ -31,7 +31,7 @@ def _find_close(s, start):
             depth -= 1
             if depth == 0:
                 return i
-    raise XlateError("unbalanced parentheses")
+    raise XlateError("unausgeglichene Klammern")
 
 
 def _split_args(s):
@@ -124,7 +124,7 @@ def _rewrite_texture_methods(src):
                 elif len(parts) == 3:
                     coord, lod = f"int2({parts[0]}, {parts[1]})", parts[2]
                 else:
-                    raise XlateError("unexpected Load() form")
+                    raise XlateError("unerwartete Load()-Form")
             else:
                 coord, lod = f"({inner}).xy", f"({inner}).z"
             if len(args) > 1:
@@ -134,9 +134,9 @@ def _rewrite_texture_methods(src):
             ch = {"Gather": "R", "GatherRed": "R", "GatherGreen": "G", "GatherBlue": "B", "GatherAlpha": "A"}[meth]
             rep = f"tex2Dgather{ch}({tex}, {args[1]}" + (f", {args[2]}" if len(args) > 2 else "") + ")"
         elif meth == "GetDimensions":
-            raise XlateError("GetDimensions outside spvTextureSize")
+            raise XlateError("GetDimensions wird nicht unterstützt")
         else:
-            raise XlateError(f"unsupported texture method {meth}")
+            raise XlateError(f"nicht unterstützte Texturfunktion {meth}")
         out += src[pos:m.start()] + rep
         pos = close + 1
 
@@ -176,7 +176,7 @@ class Stage:
         src = re.sub(r"^Texture2D<\w+>\s+\w+\s*:\s*register\(\w+\)\s*;\n?", "", src, flags=re.M)
         src = re.sub(r"^SamplerState\s+\w+\s*:\s*register\(\w+\)\s*;\n?", "", src, flags=re.M)
         if re.search(r"^Texture(?!2D<)\w*", src, re.M):
-            raise XlateError("unsupported texture type (only 2D textures are supported)")
+            raise XlateError("nicht unterstützter Texturtyp (nur 2D-Texturen)")
 
         # stage IO structs
         src, ins = _remove_block(src, r"^struct SPIRV_Cross_Input\s*\{")
@@ -187,7 +187,7 @@ class Stage:
         # entry point
         m = re.search(r"^(?:SPIRV_Cross_Output|void)\s+main\((.*?)\)\s*\{", src, re.M)
         if not m:
-            raise XlateError("entry point not found")
+            raise XlateError("Einstiegspunkt nicht gefunden")
         open_i = src.index("{", m.end() - 1)
         depth, i = 0, open_i
         while True:
@@ -212,7 +212,7 @@ class Stage:
         # call arguments: f(tex, _tex_sampler, ...) -> f(tex, ...)
         src = re.sub(r"(\w+)\s*,\s*_\1_sampler\b", r"\1", src)
         if re.search(r"\b_\w+_sampler\b", src):
-            raise XlateError("could not resolve separate sampler usage")
+            raise XlateError("getrennte Sampler werden nicht unterstützt")
         src = fix_big_literals(src)
         src = flatten_2d_arrays(src.strip() + "\n")
         self.body = expand_struct_initializers(src)
@@ -240,7 +240,7 @@ def _match_bracket(s, i):
             depth -= 1
             if depth == 0:
                 return j
-    raise XlateError("unbalanced brackets")
+    raise XlateError("unausgeglichene eckige Klammern")
 
 
 def _match_brace(s, i):
@@ -252,7 +252,7 @@ def _match_brace(s, i):
             depth -= 1
             if depth == 0:
                 return j
-    raise XlateError("unbalanced braces")
+    raise XlateError("unausgeglichene geschweifte Klammern")
 
 
 def flatten_2d_arrays(src):
@@ -322,7 +322,7 @@ def flatten_2d_arrays(src):
             expr = f"({expr}) * {shape[k]} + ({idx[k]})"
         if len(idx) < len(shape):
             # partial indexing (row access) is not representable; let the compiler complain
-            raise XlateError("partial indexing of a multi-dimensional array")
+            raise XlateError("teilweiser Zugriff auf mehrdimensionales Array")
         out += src[pos:m.start()] + f"{m.group(1)}[{expr}]"
         pos = j
     return out + src[pos:]

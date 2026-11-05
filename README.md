@@ -16,9 +16,16 @@ gamescope kann ReShade-Effekte (`.fx`) auf das Bild des laufenden Spiels anwende
 
 ## Shader
 
-- **Retro Crisis:** die [Retro Crisis GDV-NTSC](https://github.com/RetroCrisis/Retro-Crisis-GDV-NTSC)-Presets (GPL-3), inklusive des Ordners „720p Steam Deck“.
-- **RetroArch:** die [libretro slang-shaders](https://github.com/libretro/slang-shaders) (ohne Mega Bezel).
-- **Eigene:** beliebige Slang-Presets nach `~/deckglass-shaders/` kopieren (Ordnerstruktur mit `#include`s und Texturen beibehalten).
+Die Auswahl funktioniert wie ein Dateiexplorer (wie in RetroArch) mit zwei Überordnern:
+
+- **RetroArch:** die [libretro slang-shaders](https://github.com/libretro/slang-shaders). Ausgeblendet sind Mega Bezel, HDR-Shader, Testbilder und reine Quelltext-Ordner.
+- **RetroCrisis:** die [Retro Crisis GDV-NTSC](https://github.com/RetroCrisis/Retro-Crisis-GDV-NTSC)-Presets (GPL-3), inklusive des Ordners „720p Steam Deck“.
+
+## Bedienung
+
+- **Shader aktiv / Nur im Spiel:** „Nur im Spiel“ lässt die Steam-Menüs unberührt. War es aus, startet der Shader nach einem Neustart ausgeschaltet.
+- **Pro Spiel:** Während ein Spiel läuft, speichert dieser Schalter alle Einstellungen nur für dieses Spiel. Beim Beenden gelten wieder die globalen Einstellungen.
+- **Parameter:** eigenes Fenster mit allen Reglern der Voreinstellung.
 
 ## Einschränkungen
 

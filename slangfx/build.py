@@ -23,7 +23,7 @@ def _tool(name):
     p = os.path.join(BIN_DIR, name)
     if os.path.isfile(p):
         return p
-    raise ConvertError(f"tool not found: {p}")
+    raise ConvertError(f"Werkzeug nicht gefunden: {p}")
 
 
 def _run(cmd):
@@ -77,7 +77,7 @@ def _png_size(path):
     with open(path, "rb") as f:
         head = f.read(24)
     if head[:8] != b"\x89PNG\r\n\x1a\n":
-        raise ConvertError(f"LUT is not a PNG: {path}")
+        raise ConvertError(f"Textur ist kein PNG: {path}")
     return struct.unpack(">II", head[16:24])
 
 
@@ -148,7 +148,7 @@ def convert(preset_path, options=None, workdir=None):
     try:
         preset = Preset(preset_path)
     except (PresetError, OSError, ValueError) as e:
-        raise ConvertError(f"preset: {e}")
+        raise ConvertError(f"Voreinstellung: {e}")
     n = len(preset.passes)
     own_tmp = workdir is None
     tmp = tempfile.TemporaryDirectory() if own_tmp else None
@@ -169,7 +169,7 @@ def _convert(preset, options, wd):
         try:
             src = SlangSource(p.shader)
         except OSError as e:
-            raise ConvertError(f"pass {i}: {e}")
+            raise ConvertError(f"Durchlauf {i}: {e}")
         info = PassInfo()
         info.index = i
         info.p = p
@@ -192,7 +192,7 @@ def _convert(preset, options, wd):
             info.vs = Stage(compile_stage(src.vertex, "vertex", wd), "vertex")
             info.fs = Stage(compile_stage(src.fragment, "fragment", wd), "fragment")
         except (ConvertError, XlateError) as e:
-            raise ConvertError(f"pass {i} ({os.path.basename(p.shader)}): {e}")
+            raise ConvertError(f"Durchlauf {i} ({os.path.basename(p.shader)}): {e}")
         infos.append(info)
 
     aliases = {info.alias: info.index for info in infos if info.alias}
@@ -229,7 +229,7 @@ def _convert(preset, options, wd):
             k = aliases[name[:-8]]
             feedback.add(k)
             return ("fb", k)
-        raise ConvertError(f"pass {i}: unknown texture '{name}'")
+        raise ConvertError(f"Durchlauf {i}: unbekannte Textur '{name}'")
 
     for info in infos:
         info.tex_refs = {}
@@ -541,7 +541,7 @@ def _convert(preset, options, wd):
                     params_sig.append(f"in {mods}{m['type']} _in_{m['name']}{m['array']} : {m['semantic']}")
                 outs = [m for m in stage.outputs if m["semantic"].upper().startswith("SV_TARGET")]
                 if len(outs) != 1:
-                    raise ConvertError(f"pass {k}: expected exactly one fragment output")
+                    raise ConvertError(f"Durchlauf {k}: genau eine Farbausgabe erwartet")
                 o = outs[0]
                 params_sig.append(f"out {o['type']} _out_{o['name']} : SV_Target")
                 w(f"    void PS({', '.join(params_sig)})")

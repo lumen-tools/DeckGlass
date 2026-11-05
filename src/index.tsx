@@ -1,21 +1,26 @@
 import {
   ButtonItem,
+  DialogButton,
   Dropdown,
   DropdownOption,
+  Focusable,
+  ModalRoot,
   PanelSection,
   PanelSectionRow,
-  SliderField,
   Router,
+  SliderField,
   ToggleField,
+  showModal,
   staticClasses,
 } from "@decky/ui";
 import { callable, definePlugin } from "@decky/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MdMonitor } from "react-icons/md";
 
+// ------------------------------------------------------------------ types & backend
+
 type Preset = { key: string; label: string };
-type Group = { folder: string; presets: Preset[] };
-type Library = { library: string; groups: Group[] };
+type Folder = { name: string; folders: Folder[]; presets: Preset[] };
 type System = { id: string; label: string; w: number; h: number };
 type Param = { name: string; label: string; min: number; max: number; step: number; default: number; value: number };
 type Settings = {
@@ -32,9 +37,10 @@ type Settings = {
 };
 type ApplyResult = { ok: boolean; error?: string; warning?: string | null; params: Param[] };
 
-const getLibrary = callable<[], Library[]>("get_library");
+const getLibrary = callable<[], Folder>("get_library");
 const getSystems = callable<[], System[]>("get_systems");
 const getSettings = callable<[], Settings>("get_settings");
+const getParams = callable<[], Param[]>("get_params");
 const updateSettings = callable<[Partial<Settings>], ApplyResult>("update_settings");
 const setParam = callable<[string, string, number], ApplyResult>("set_param");
 const resetParams = callable<[string], ApplyResult>("reset_params");
@@ -42,55 +48,179 @@ const reapply = callable<[], ApplyResult>("reapply");
 const setInGame = callable<[boolean, string | null, string | null], ApplyResult>("set_in_game");
 const setProfile = callable<[boolean], ApplyResult>("set_profile");
 
-// Browsing state lives outside the component: Decky may remount the panel (for
-// example when a dropdown menu closes), which would otherwise reset the selection.
-const browse: { lib: string | null; folder: string | null } = { lib: null, folder: null };
-
+// The side panel listens here so dialogs can tell it to refresh.
+const listeners = new Set<() => void>();
+const notifyChanged = () => listeners.forEach((l) => l());
 
 const MANUAL = "__manual__";
 
-function splitKey(key: string | null): { library: string; folder: string } | null {
-  if (!key) return null;
-  const i = key.indexOf("/");
-  const rel = key.slice(i + 1);
-  const j = rel.lastIndexOf("/");
-  return { library: key.slice(0, i), folder: j < 0 ? "." : rel.slice(0, j) };
+// ------------------------------------------------------------------ helpers
+
+/** Folder names from the library root to the folder that holds `key`. */
+function pathOf(root: Folder, key: string | null): string[] {
+  if (!key) return [];
+  const walk = (f: Folder, trail: string[]): string[] | null => {
+    if (f.presets.some((p) => p.key === key)) return trail;
+    for (const sub of f.folders) {
+      const r = walk(sub, [...trail, sub.name]);
+      if (r) return r;
+    }
+    return null;
+  };
+  return walk(root, []) ?? [];
 }
 
-function preferredFolder(l: Library | undefined): string {
-  if (!l) return "";
-  return (l.groups.find((g) => /steam deck/i.test(g.folder)) ?? l.groups[0])?.folder ?? "";
+function folderAt(root: Folder, path: string[]): Folder {
+  let cur = root;
+  for (const name of path) {
+    const next = cur.folders.find((f) => f.name === name);
+    if (!next) break;
+    cur = next;
+  }
+  return cur;
 }
 
-function Content() {
-  const [library, setLibrary] = useState<Library[]>([]);
-  const [systems, setSystems] = useState<System[]>([]);
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [lib, setLibState] = useState<string>(browse.lib ?? "");
-  const [folder, setFolderState] = useState<string>(browse.folder ?? "");
-  const setLib = (v: string) => {
-    browse.lib = v;
-    setLibState(v);
+function presetLabel(root: Folder | null, key: string | null): string {
+  if (!root || !key) return "Keine ausgewählt";
+  const p = folderAt(root, pathOf(root, key)).presets.find((x) => x.key === key);
+  return p ? p.label : key.split("/").pop()!.replace(/\.slangp$/i, "");
+}
+
+const rowStyle = {
+  display: "flex",
+  justifyContent: "flex-start",
+  textAlign: "left" as const,
+  width: "100%",
+  marginBottom: "4px",
+  padding: "8px 12px",
+  minWidth: 0,
+};
+
+const titleStyle = { fontWeight: "bold" as const, fontSize: "18px", marginBottom: "4px" };
+const subtitleStyle = { fontSize: "13px", opacity: 0.7, marginBottom: "10px" };
+
+// ------------------------------------------------------------------ shader browser
+
+function Browser({ root, current, closeModal }: { root: Folder; current: string | null; closeModal?: () => void }) {
+  const [path, setPath] = useState<string[]>(() => pathOf(root, current));
+  const folder = folderAt(root, path);
+
+  const choose = async (key: string) => {
+    closeModal?.();
+    await updateSettings({ preset: key, enabled: true });
+    notifyChanged();
   };
-  const setFolder = (v: string) => {
-    browse.folder = v;
-    setFolderState(v);
-  };
-  const [params, setParams] = useState<Param[]>([]);
-  const [showParams, setShowParams] = useState(false);
-  const [busy, setBusy] = useState(false);
+
+  return (
+    <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
+      <div style={titleStyle}>Voreinstellung wählen</div>
+      <div style={subtitleStyle}>{path.length ? path.join(" › ") : "Übersicht"}</div>
+      <Focusable style={{ maxHeight: "60vh", overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        {path.length > 0 && (
+          <DialogButton style={rowStyle} onClick={() => setPath(path.slice(0, -1))}>
+            ‹  Zurück
+          </DialogButton>
+        )}
+        {folder.folders.map((f) => (
+          <DialogButton key={"d" + f.name} style={rowStyle} onClick={() => setPath([...path, f.name])}>
+            📁  {f.name}
+          </DialogButton>
+        ))}
+        {folder.presets.map((p) => (
+          <DialogButton key={p.key} style={rowStyle} onClick={() => choose(p.key)}>
+            {p.key === current ? "✓  " : ""}
+            {p.label}
+          </DialogButton>
+        ))}
+        {folder.folders.length === 0 && folder.presets.length === 0 && (
+          <div style={{ opacity: 0.7, padding: "8px" }}>Dieser Ordner ist leer.</div>
+        )}
+      </Focusable>
+    </ModalRoot>
+  );
+}
+
+// ------------------------------------------------------------------ parameter dialog
+
+function ParamDialog({ preset, title, closeModal }: { preset: string; title: string; closeModal?: () => void }) {
+  const [params, setParams] = useState<Param[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  useEffect(() => {
+    getParams().then(setParams);
+  }, []);
+
   const handle = (r: ApplyResult) => {
     setError(r.ok ? r.warning ?? null : r.error ?? "Unbekannter Fehler");
-    setParams(r.params ?? []);
+    notifyChanged();
   };
+
+  const onChange = (p: Param, v: number) => {
+    setParams((ps) => (ps ?? []).map((x) => (x.name === p.name ? { ...x, value: v } : x)));
+    clearTimeout(timers.current[p.name]);
+    timers.current[p.name] = setTimeout(() => setParam(preset, p.name, v).then(handle), 500);
+  };
+
+  return (
+    <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
+      <div style={titleStyle}>Parameter</div>
+      <div style={subtitleStyle}>{title}</div>
+      {error && <div style={{ color: "#ff7070", fontSize: "13px", marginBottom: "8px" }}>{error}</div>}
+      <Focusable style={{ maxHeight: "60vh", overflowY: "auto" }}>
+        {params === null && <div>Lade …</div>}
+        {params !== null && params.length === 0 && <div>Diese Voreinstellung hat keine Parameter.</div>}
+        {params !== null && params.length > 0 && (
+          <DialogButton
+            style={{ marginBottom: "8px" }}
+            onClick={async () => {
+              handle(await resetParams(preset));
+              setParams(await getParams());
+            }}
+          >
+            Alle auf Standard zurücksetzen
+          </DialogButton>
+        )}
+        {(params ?? []).map((p) =>
+          p.min === p.max ? (
+            // entries such as "[ AFTERGLOW SETTINGS ]" have no range: show them as headings
+            <div key={p.name} style={{ marginTop: "12px", fontWeight: "bold", opacity: 0.8 }}>
+              {p.label.replace(/^[\s[\]\-=:*#]+|[\s[\]\-=:*#]+$/g, "")}
+            </div>
+          ) : (
+            <SliderField
+              key={p.name}
+              label={p.label}
+              min={p.min}
+              max={p.max}
+              step={p.step > 0 ? p.step : (p.max - p.min) / 100}
+              value={p.value}
+              showValue
+              editableValue
+              onChange={(v) => onChange(p, v)}
+            />
+          )
+        )}
+      </Focusable>
+    </ModalRoot>
+  );
+}
+
+// ------------------------------------------------------------------ side panel
+
+function Content() {
+  const [library, setLibrary] = useState<Folder | null>(null);
+  const [systems, setSystems] = useState<System[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pxTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const run = async (fn: () => Promise<ApplyResult>) => {
     setBusy(true);
     try {
-      handle(await fn());
+      const r = await fn();
+      setError(r.ok ? r.warning ?? null : r.error ?? "Unbekannter Fehler");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -98,17 +228,10 @@ function Content() {
     }
   };
 
-  const loadSettings = async (l: Library[]) => {
+  const refresh = async () => {
     const st = await getSettings();
     setSettings(st);
-    if (browse.lib === null || !l.some((x) => x.library === browse.lib)) {
-      const sk = splitKey(st.preset);
-      const firstLib = sk?.library ?? l[0]?.library ?? "";
-      setLib(firstLib);
-      setFolder(sk?.folder ?? preferredFolder(l.find((x) => x.library === firstLib)));
-    }
     setError(st.last_error);
-    if (st.preset) await run(() => reapply());
   };
 
   useEffect(() => {
@@ -116,33 +239,33 @@ function Content() {
       const [l, s] = await Promise.all([getLibrary(), getSystems()]);
       setLibrary(l);
       setSystems(s);
-      await loadSettings(l);
+      await refresh();
+      await run(() => reapply());
     })();
+    const l = () => {
+      refresh();
+    };
+    listeners.add(l);
+    return () => {
+      listeners.delete(l);
+    };
   }, []);
 
   const change = async (c: Partial<Settings>) => {
     setSettings((s) => (s ? { ...s, ...c } : s));
     await run(() => updateSettings(c));
+    await refresh();
   };
 
-  const libObj = library.find((x) => x.library === lib);
-  const groupObj = libObj?.groups.find((g) => g.folder === folder);
-
-  const libOptions: DropdownOption[] = library.map((l) => ({ data: l.library, label: l.library }));
-  const folderOptions: DropdownOption[] = (libObj?.groups ?? []).map((g) => ({
-    data: g.folder,
-    label: `${g.folder === "." ? "(Hauptordner)" : g.folder} (${g.presets.length})`,
-  }));
-  const presetOptions: DropdownOption[] = (groupObj?.presets ?? []).map((p) => ({ data: p.key, label: p.label }));
   const scaleOptions: DropdownOption[] = useMemo(
     () => [
       ...systems.map((s) => ({ data: s.id, label: `${s.label} (${s.w}×${s.h})` })),
-      { data: MANUAL, label: "Manuell: Pixelgröße" },
+      { data: MANUAL, label: "Manuell (Pixelgröße)" },
     ],
     [systems]
   );
 
-  if (!settings) {
+  if (!settings || !library) {
     return (
       <PanelSection>
         <PanelSectionRow>Lade …</PanelSectionRow>
@@ -150,15 +273,8 @@ function Content() {
     );
   }
 
-  const currentLabel = settings.preset ? settings.preset.split("/").pop()?.replace(/\.slangp$/, "") : "—";
-
-  const onParam = (p: Param, v: number) => {
-    setParams((ps) => ps.map((x) => (x.name === p.name ? { ...x, value: v } : x)));
-    const preset = settings.preset;
-    if (!preset) return;
-    clearTimeout(timers.current[p.name]);
-    timers.current[p.name] = setTimeout(() => run(() => setParam(preset, p.name, v)), 500);
-  };
+  const label = presetLabel(library, settings.preset);
+  const where = settings.preset ? pathOf(library, settings.preset).join(" › ") : "";
 
   return (
     <>
@@ -167,7 +283,7 @@ function Content() {
           <ToggleField
             label="Shader aktiv"
             checked={settings.enabled}
-            disabled={busy}
+            disabled={busy || !settings.preset}
             onChange={(v) => change({ enabled: v })}
           />
         </PanelSectionRow>
@@ -180,12 +296,11 @@ function Content() {
             onChange={(v) => change({ only_in_game: v })}
           />
         </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ fontSize: "12px" }}>
-            Aktuell: <b>{currentLabel}</b>
-            {busy ? " · wird umgewandelt …" : ""}
-          </div>
-        </PanelSectionRow>
+        {busy && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "12px", opacity: 0.8 }}>Shader wird umgewandelt …</div>
+          </PanelSectionRow>
+        )}
         {error && (
           <PanelSectionRow>
             <div style={{ fontSize: "12px", color: "#ff7070", wordBreak: "break-word" }}>{error}</div>
@@ -200,14 +315,14 @@ function Content() {
               label="Pro Spiel"
               description={
                 settings.profile_active
-                  ? `Einstellungen gelten nur für ${settings.app_name ?? "dieses Spiel"}`
-                  : `Globale Einstellungen – einschalten, um ${settings.app_name ?? "dieses Spiel"} eigene zu geben`
+                  ? `Gilt nur für ${settings.app_name ?? "dieses Spiel"}`
+                  : `Einschalten, um ${settings.app_name ?? "diesem Spiel"} eigene Einstellungen zu geben`
               }
               checked={settings.profile_active}
               disabled={busy}
               onChange={async (v) => {
                 await run(() => setProfile(v));
-                await loadSettings(library);
+                await refresh();
               }}
             />
           </PanelSectionRow>
@@ -216,35 +331,35 @@ function Content() {
 
       <PanelSection title="Shader">
         <PanelSectionRow>
-          <Dropdown
-            menuLabel="Sammlung"
-            rgOptions={libOptions}
-            selectedOption={lib}
-            onChange={(o) => {
-              setLib(o.data);
-              const l = library.find((x) => x.library === o.data);
-              setFolder(preferredFolder(l));
-            }}
-          />
+          <div style={{ fontSize: "14px" }}>
+            <div style={{ fontWeight: "bold", wordBreak: "break-word" }}>{label}</div>
+            {where && <div style={{ fontSize: "12px", opacity: 0.7, wordBreak: "break-word" }}>{where}</div>}
+          </div>
         </PanelSectionRow>
         <PanelSectionRow>
-          <Dropdown menuLabel="Ordner" rgOptions={folderOptions} selectedOption={folder} onChange={(o) => setFolder(o.data)} />
+          <ButtonItem
+            layout="below"
+            disabled={busy}
+            onClick={() => showModal(<Browser root={library} current={settings.preset} />)}
+          >
+            Voreinstellung wählen …
+          </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
-          <Dropdown
-            menuLabel="Preset"
-            strDefaultLabel="Preset wählen"
-            rgOptions={presetOptions}
-            selectedOption={settings.preset}
-            onChange={(o) => change({ preset: o.data, enabled: true })}
-          />
+          <ButtonItem
+            layout="below"
+            disabled={busy || !settings.preset}
+            onClick={() => settings.preset && showModal(<ParamDialog preset={settings.preset} title={label} />)}
+          >
+            Parameter …
+          </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
 
       <PanelSection title="Quellauflösung">
         <PanelSectionRow>
           <Dropdown
-            menuLabel="System"
+            menuLabel="Quellauflösung"
             rgOptions={scaleOptions}
             selectedOption={settings.scale_mode === "manual" ? MANUAL : settings.system}
             onChange={(o) =>
@@ -256,7 +371,7 @@ function Content() {
           <PanelSectionRow>
             <SliderField
               label="Pixelgröße"
-              description="Bildschirmpixel pro Original-Pixel"
+              description="Bildschirmpixel pro Originalpixel"
               min={1}
               max={8}
               step={0.05}
@@ -265,55 +380,24 @@ function Content() {
               editableValue
               onChange={(v) => {
                 setSettings((s) => (s ? { ...s, pixel_size: v } : s));
-                clearTimeout(timers.current.__px);
-                timers.current.__px = setTimeout(() => change({ pixel_size: v }), 500);
+                clearTimeout(pxTimer.current);
+                pxTimer.current = setTimeout(() => change({ pixel_size: v }), 500);
               }}
             />
           </PanelSectionRow>
         )}
       </PanelSection>
-
-      {params.length > 0 && (
-        <PanelSection title={`Parameter (${params.length})`}>
-          <PanelSectionRow>
-            <ToggleField label="Parameter anzeigen" checked={showParams} onChange={setShowParams} />
-          </PanelSectionRow>
-          {showParams && (
-            <>
-              <PanelSectionRow>
-                <ButtonItem layout="below" disabled={busy} onClick={() => settings.preset && run(() => resetParams(settings.preset!))}>
-                  Auf Standard zurücksetzen
-                </ButtonItem>
-              </PanelSectionRow>
-              {params.map((p) =>
-                p.min === p.max ? null : (
-                  <PanelSectionRow key={p.name}>
-                    <SliderField
-                      label={p.label}
-                      min={p.min}
-                      max={p.max}
-                      step={p.step > 0 ? p.step : (p.max - p.min) / 100}
-                      value={p.value}
-                      showValue
-                      editableValue
-                      onChange={(v) => onParam(p, v)}
-                    />
-                  </PanelSectionRow>
-                )
-              )}
-            </>
-          )}
-        </PanelSection>
-      )}
     </>
   );
 }
 
 export default definePlugin(() => {
-  // Tell the backend whether a game is running, so the Steam UI can stay unshaded.
+  // Tell the backend which game is running (per-game profiles, Steam UI stays unshaded).
   const report = () => {
     const app = Router.MainRunningApp as any;
-    return setInGame(!!app, app ? String(app.appid) : null, app?.display_name ?? null).catch(() => {});
+    return setInGame(!!app, app ? String(app.appid) : null, app?.display_name ?? null)
+      .then(() => notifyChanged())
+      .catch(() => {});
   };
   report();
   const reg = (window as any).SteamClient?.GameSessions?.RegisterForAppLifetimeNotifications?.(() => {

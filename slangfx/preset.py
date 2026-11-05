@@ -58,9 +58,9 @@ def _read_kv(path):
 
 def _load_merged(path, depth=0):
     if depth > 16:
-        raise PresetError("reference depth exceeded")
+        raise PresetError("zu viele verschachtelte #reference")
     if not os.path.isfile(path):
-        raise PresetError(f"preset not found: {path}")
+        raise PresetError(f"Datei nicht gefunden: {path}")
     values, refs = _read_kv(path)
     merged = {}
     for r in refs:
@@ -117,7 +117,7 @@ class Preset:
 
         n = int(get("shaders", "0"))
         if n <= 0:
-            raise PresetError("preset has no shaders")
+            raise PresetError("Voreinstellung enthält keine Shader")
         self.passes = []
         for i in range(n):
             p = Pass()
@@ -204,7 +204,7 @@ class SlangSource:
 
     def _load(self, path, depth):
         if depth > 32:
-            raise PresetError("include depth exceeded")
+            raise PresetError("zu viele verschachtelte #include")
         out = []
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:

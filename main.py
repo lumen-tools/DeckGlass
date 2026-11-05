@@ -35,11 +35,9 @@ CRASH_MESSAGE = ("gamescope ist mit diesem Shader abgestürzt. Der Shader wurde 
 
 # Shader libraries: bundled ones plus a user folder for own presets.
 # Layout mirrors RetroArch, so Retro Crisis' "../../../shaders_slang/..." paths resolve.
-USER_LIBRARY = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")
 LIBRARIES = [
-    ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
     ("RetroArch", os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")),
-    ("Eigene", USER_LIBRARY),
+    ("RetroCrisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
 ]
 
 # Native resolutions of common systems. The game image is assumed to be scaled to
@@ -99,6 +97,59 @@ def _xprop_set(value):
         logger.error(f"xprop failed: {r.stderr.strip()}")
         return False
     return True
+
+
+# Folders that only hold shader sources, old variants or need HDR output.
+HIDDEN_DIRS = {"shaders", "shader", "old", "hooks", "resources", "include", "includes", "hdr", "bezel", "test",
+               "__macosx"}
+
+
+def _tidy_labels(names):
+    """Strip a prefix shared by every preset in a folder, e.g. "RC GDV-NTSC - "."""
+    if len(names) < 2:
+        return {n: n for n in names}
+    prefix = os.path.commonprefix(names)
+    cut = prefix.rfind(" - ")
+    if cut <= 0:
+        return {n: n for n in names}
+    cut += 3
+    return {n: (n[cut:].strip() or n) for n in names}
+
+
+def _scan(lib, root, rel=""):
+    path = os.path.join(root, rel)
+    try:
+        entries = sorted(os.scandir(path), key=lambda e: e.name.lower())
+    except OSError:
+        return None
+    folders, stems = [], []
+    for e in entries:
+        if e.name.startswith(".") or e.name.startswith("._"):
+            continue
+        if e.is_dir():
+            if e.name.lower() in HIDDEN_DIRS:
+                continue
+            sub = _scan(lib, root, os.path.join(rel, e.name) if rel else e.name)
+            if sub:
+                folders.append(sub)
+        elif e.name.lower().endswith(".slangp"):
+            stems.append(e.name[:-7])
+    if not folders and not stems:
+        return None
+    labels = _tidy_labels(stems)
+    presets = [{"key": f"{lib}/{rel + '/' if rel else ''}{st}.slangp", "label": labels[st]} for st in stems]
+    presets.sort(key=lambda p: p["label"].lower())
+    return {"name": os.path.basename(rel) if rel else lib, "folders": folders, "presets": presets}
+
+
+def _build_library():
+    libs = []
+    for name, root in LIBRARIES:
+        node = _scan(name, root) if os.path.isdir(root) else None
+        if node is None:
+            node = {"name": name, "folders": [], "presets": []}
+        libs.append(node)
+    return {"name": "", "folders": libs, "presets": []}
 
 
 def _gamescope_pids():
@@ -181,22 +232,21 @@ class Plugin:
         return None
 
     async def get_library(self):
-        """All presets grouped by library and folder."""
-        os.makedirs(USER_LIBRARY, exist_ok=True)
-        result = []
-        for name, root in LIBRARIES:
-            if not os.path.isdir(root):
-                continue
-            groups = {}
-            for p in sorted(Path(root).rglob("*.slangp")):
-                if "__MACOSX" in p.parts or p.name.startswith("._"):
-                    continue
-                rel = p.relative_to(root).as_posix()
-                folder = os.path.dirname(rel) or "."
-                groups.setdefault(folder, []).append({"key": f"{name}/{rel}", "label": p.stem})
-            if groups:
-                result.append({"library": name, "groups": [{"folder": k, "presets": v} for k, v in sorted(groups.items())]})
-        return result
+        """Preset tree for the file browser: libraries are the top-level folders."""
+        return await asyncio.to_thread(_build_library)
+
+    async def get_params(self):
+        """Parameters of the active preset with their current values."""
+        a = Plugin._active()
+        path = Plugin._resolve_preset(a.get("preset"))
+        if not path:
+            return []
+        try:
+            return await asyncio.to_thread(slangfx_build.list_parameters, path,
+                                           a.get("params", {}).get(a["preset"], {}))
+        except Exception:
+            logger.exception("list parameters")
+            return []
 
     async def get_systems(self):
         return SYSTEMS
@@ -227,7 +277,7 @@ class Plugin:
     def _build(key):
         path = Plugin._resolve_preset(key)
         if not path:
-            raise ConvertError("Preset nicht gefunden")
+            raise ConvertError("Voreinstellung nicht gefunden")
         opts = Plugin._options(key)
         tag = hashlib.sha1(key.encode()).hexdigest()[:10]
         opts.lut_dir = f"{LUT_ROOT}/{tag}"
@@ -276,11 +326,11 @@ class Plugin:
         try:
             name, plist = await asyncio.to_thread(Plugin._build, key)
         except ConvertError as e:
-            Plugin.last_error = str(e)
+            Plugin.last_error = f"Umwandlung fehlgeschlagen: {e}"
             logger.error(f"convert {key}: {e}")
-            return {"ok": False, "error": str(e), "params": []}
+            return {"ok": False, "error": Plugin.last_error, "params": []}
         except Exception as e:
-            Plugin.last_error = f"{type(e).__name__}: {e}"
+            Plugin.last_error = f"Interner Fehler ({type(e).__name__}): {e}"
             logger.exception(f"convert {key}")
             return {"ok": False, "error": Plugin.last_error, "params": []}
         if name != Plugin.current_fx:
@@ -372,7 +422,6 @@ class Plugin:
     # ------------------------------------------------------------------ lifecycle
     async def _main(self):
         Plugin.lock = asyncio.Lock()
-        os.makedirs(USER_LIBRARY, exist_ok=True)
         for tool in ("glslang", "spirv-cross"):
             p = os.path.join(PLUGIN_DIR, "slangfx", "bin", tool)
             try:

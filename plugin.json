@@ -1,11 +1,16 @@
 {
   "name": "DeckGlass",
   "author": "DeckGlass contributors",
-  "flags": ["debug"],
+  "flags": [
+    "debug"
+  ],
   "api_version": 1,
   "publish": {
-    "tags": ["display", "shaders"],
-    "description": "RetroArch slang shaders (CRT, LCD, NTSC ...) for every game, via gamescope ReShade.",
+    "tags": [
+      "display",
+      "shaders"
+    ],
+    "description": "RetroArch- und Retro-Crisis-Shader (CRT, LCD, NTSC …) für jedes Spiel – über gamescope ReShade.",
     "image": ""
   }
 }
