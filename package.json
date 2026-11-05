@@ -1,13 +1,13 @@
 {
   "name": "deckglass",
-  "version": "0.1.7",
+  "version": "0.1.0",
   "description": "RetroArch slang shaders for the whole Steam Deck screen, via gamescope ReShade",
   "type": "module",
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w"
   },
-  "license": "GPL-3.0-or-later",
+  "license": "GPL-3.0-only",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.16.5",
@@ -23,7 +23,14 @@
   },
   "pnpm": {
     "peerDependencyRules": {
-      "ignoreMissing": ["react", "react-dom"]
+      "ignoreMissing": [
+        "react",
+        "react-dom"
+      ]
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lumen-tools/DeckGlass"
   }
 }

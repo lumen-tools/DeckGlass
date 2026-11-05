@@ -1,5 +1,7 @@
 # DeckGlass
 
+> **Beta:** works well in testing, but expect rough edges. Please report problems via GitHub issues.
+
 A Decky plugin that puts **RetroArch shaders (slang presets)** on top of the whole game image on the Steam Deck – for every game and emulator, not just inside RetroArch. Inspired by [ShaderGlass](https://github.com/mausimus/ShaderGlass), built on [Reshadeck](https://github.com/safijari/Reshadeck).
 
 ## How it works
@@ -45,6 +47,10 @@ pnpm install
 ```
 
 Result: `out/DeckGlass-<version>.zip`, installable via Decky (developer mode → "Install Plugin from ZIP").
+
+## Disclaimer
+
+Not affiliated with Valve, libretro or Retro Crisis. "Steam" and "Steam Deck" are trademarks of Valve Corporation.
 
 ## License
 
