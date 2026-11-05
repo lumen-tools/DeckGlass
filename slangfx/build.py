@@ -124,27 +124,59 @@ def _clamp_param_indices(code):
 MIP_LEVELS = 11  # enough for textures up to 2048 pixels
 
 
-def _rewrite_lod_reads(code, sampler):
-    """tex2Dlod(sampler, float4(uv, 0.0, lod)) -> sampler__lod(uv, lod), which reads the
-    emulated mip chain. Returns (code, used)."""
+def _lod_reads(code, sampler):
+    """All tex2Dlod(sampler, float4(uv, 0.0, lod)) calls: list of (start, end, uv, lod)."""
     from .xlate import _find_close, _split_args
     pat = re.compile(r"\btex2Dlod\(\s*" + re.escape(sampler) + r"\s*,")
-    out, pos, used = "", 0, False
+    res, pos = [], 0
     while True:
         m = pat.search(code, pos)
         if not m:
-            return out + code[pos:], used
+            return res
         open_i = code.index("(", m.start())
         close = _find_close(code, open_i)
         args = _split_args(code[open_i + 1:close])
         mm = re.match(r"float4\((.*)\)$", args[1].strip(), re.S) if len(args) == 2 else None
         inner = _split_args(mm.group(1)) if mm else []
         if len(inner) == 3:
-            out += code[pos:m.start()] + f"{sampler}__lod({inner[0]}, {inner[2]})"
-            used = True
-        else:
-            out += code[pos:close + 1]
+            res.append((m.start(), close + 1, inner[0], inner[2]))
         pos = close + 1
+
+
+def _const_lod(expr):
+    m = re.fullmatch(r"\(?\s*(-?\d+(?:\.\d*)?)f?\s*\)?", expr.strip())
+    return float(m.group(1)) if m else None
+
+
+def _rewrite_lod_reads(code, sampler, full_chain):
+    """Point explicit-LOD reads at the emulated mip levels. A constant LOD becomes a
+    direct read of that level (one texture fetch); a computed LOD calls sampler__lod(),
+    which needs the full chain. Returns (code, levels read directly, needs __lod)."""
+    reads = _lod_reads(code, sampler)
+    out, pos, levels, need_fn = "", 0, set(), False
+
+    def direct(uv, lv):
+        lv = max(0, min(MIP_LEVELS, lv))
+        name = sampler if lv == 0 else f"{sampler}__m{lv}"
+        if lv:
+            levels.add(lv)
+        return f"tex2Dlod({name}, float4({uv}, 0.0, 0.0))"
+
+    for start, end, uv, lod in reads:
+        c = _const_lod(lod)
+        if c is not None and not full_chain:
+            lo = int(c // 1)
+            frac = c - lo
+            if frac < 1e-6:
+                rep = direct(uv, lo)
+            else:
+                rep = f"lerp({direct(uv, lo)}, {direct(uv, lo + 1)}, {frac})"
+        else:
+            rep = f"{sampler}__lod({uv}, {lod})"
+            need_fn = True
+        out += code[pos:start] + rep
+        pos = end
+    return out + code[pos:], levels, need_fn
 
 
 def _fix_literal_swizzles(code):
@@ -467,8 +499,10 @@ def _convert(preset, options, wd):
 
     # gamescope has no mipmaps. Shaders that read explicit mip levels of a
     # mipmap_input texture (e.g. crt-geom-deluxe's average brightness at LOD 9) get an
-    # emulated chain: each level halves the previous one with a 2x2 box filter.
-    mip_chains = {}        # texture name -> (width macro, height macro)
+    # emulated chain. When every read uses a constant LOD, only the levels needed are
+    # built, up to 3 levels per pass (exact 8x8 box average from 4x4 bilinear taps), and
+    # each read is a single fetch. A computed LOD needs every level (full chain).
+    mip_chains = {}        # texture name -> {"size": (w, h), "full": bool, "levels": set()}
     pass_mips = {}         # pass index -> [texture names whose chain must be built first]
     for info in infos:
         if not info.p.mipmap_input:
@@ -476,25 +510,53 @@ def _convert(preset, options, wd):
         for st in (info.vs, info.fs):
             for t in st.textures:
                 ref = info.tex_refs[t]
-                if ref[0] == "lut" or not re.search(r"\btex2Dlod\(\s*" + re.escape(t) + r"\s*,", st.body):
+                if ref[0] == "lut":
+                    continue
+                reads = _lod_reads(st.body, t)
+                if not reads:
                     continue
                 tn = tex_name(ref)
-                if tn not in mip_chains:
-                    mip_chains[tn] = size_of(ref)
+                chain = mip_chains.setdefault(tn, {"size": size_of(ref), "full": False, "levels": set()})
+                for _, _, _, lod in reads:
+                    c = _const_lod(lod)
+                    if c is None:
+                        chain["full"] = True
+                    else:
+                        lo = max(0, min(MIP_LEVELS, int(c // 1)))
+                        chain["levels"].update({lo, min(MIP_LEVELS, lo + (1 if c - lo > 1e-6 else 0))})
                 pass_mips.setdefault(info.index, [])
                 if tn not in pass_mips[info.index]:
                     pass_mips[info.index].append(tn)
-    for tn, (bw, bh) in mip_chains.items():
-        for lv in range(1, MIP_LEVELS + 1):
-            d = 2 ** lv
-            fmt = "RGBA16F"
-            w(f"texture {tn}_M{lv} {{ Width = (({bw}) + {d - 1}) / {d}; Height = (({bh}) + {d - 1}) / {d}; Format = {fmt}; }};")
-            prev = tn if lv == 1 else f"{tn}_M{lv - 1}"
-            w(f"sampler2D S_{tn}_R{lv} {{ Texture = {prev}; MagFilter = LINEAR; MinFilter = LINEAR; MipFilter = POINT; "
+    chain_steps = {}       # texture name -> [(from_level, to_level)]
+    for tn, chain in mip_chains.items():
+        targets = list(range(1, MIP_LEVELS + 1)) if chain["full"] else sorted(l for l in chain["levels"] if l > 0)
+        steps, cur = [], 0
+        for tgt in targets:
+            while cur < tgt:
+                nxt = min(tgt, cur + (1 if chain["full"] else 3))
+                steps.append((cur, nxt))
+                cur = nxt
+        chain_steps[tn] = steps
+        bw, bh = chain["size"]
+        for frm, to in steps:
+            d = 2 ** to
+            w(f"texture {tn}_M{to} {{ Width = (({bw}) + {d - 1}) / {d}; Height = (({bh}) + {d - 1}) / {d}; Format = RGBA16F; }};")
+            src = tn if frm == 0 else f"{tn}_M{frm}"
+            w(f"sampler2D S_{tn}_R{to} {{ Texture = {src}; MagFilter = LINEAR; MinFilter = LINEAR; MipFilter = POINT; "
               "AddressU = CLAMP; AddressV = CLAMP; };")
-            w(f"float4 SFX_PS_{tn}_M{lv}(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target")
+            f = 2 ** (to - frm)          # reduction factor of this pass
+            taps = max(1, f // 2)        # bilinear taps per axis, each averages 2x2 texels
+            w(f"float4 SFX_PS_{tn}_M{to}(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target")
             w("{")
-            w(f"    return tex2D(S_{tn}_R{lv}, uv);")
+            if taps == 1:
+                w(f"    return tex2D(S_{tn}_R{to}, uv);")
+            else:
+                w(f"    float2 px = 1.0 / float2(tex2Dsize(S_{tn}_R{to}, 0));")
+                w("    float4 sum = 0.0;")
+                w(f"    [unroll] for (int y = 0; y < {taps}; y++)")
+                w(f"    [unroll] for (int x = 0; x < {taps}; x++)")
+                w(f"        sum += tex2D(S_{tn}_R{to}, uv + (float2(x, y) * 2.0 - {taps - 1}.0) * px);")
+                w(f"    return sum / {taps * taps}.0;")
             w("}")
     w("")
 
@@ -608,25 +670,26 @@ def _convert(preset, options, wd):
                 if tn not in mip_chains or tn not in pass_mips.get(k, []):
                     continue
                 sname = rename_reserved(t)
-                body, used = _rewrite_lod_reads(body, sname)
-                if not used:
-                    continue
-                for lv in range(1, MIP_LEVELS + 1):
+                full = mip_chains[tn]["full"]
+                body, levels, need_fn = _rewrite_lod_reads(body, sname, full)
+                built = [to for _, to in chain_steps[tn]]
+                for lv in (built if need_fn else sorted(levels)):
                     mip_code.append(f"    sampler2D {sname}__m{lv} {{ Texture = {tn}_M{lv}; MagFilter = LINEAR; "
                                     "MinFilter = LINEAR; MipFilter = POINT; AddressU = CLAMP; AddressV = CLAMP; };")
-                mip_code.append(f"    float4 {sname}__lvl(float2 uv, float l)")
-                mip_code.append("    {")
-                mip_code.append(f"        if (l < 0.5) return tex2Dlod({sname}, float4(uv, 0.0, 0.0));")
-                for lv in range(1, MIP_LEVELS):
-                    mip_code.append(f"        if (l < {lv}.5) return tex2Dlod({sname}__m{lv}, float4(uv, 0.0, 0.0));")
-                mip_code.append(f"        return tex2Dlod({sname}__m{MIP_LEVELS}, float4(uv, 0.0, 0.0));")
-                mip_code.append("    }")
-                mip_code.append(f"    float4 {sname}__lod(float2 uv, float lod)")
-                mip_code.append("    {")
-                mip_code.append(f"        lod = clamp(lod, 0.0, {MIP_LEVELS}.0);")
-                mip_code.append("        float l = floor(lod);")
-                mip_code.append(f"        return lerp({sname}__lvl(uv, l), {sname}__lvl(uv, l + 1.0), lod - l);")
-                mip_code.append("    }")
+                if need_fn:
+                    mip_code.append(f"    float4 {sname}__lvl(float2 uv, float l)")
+                    mip_code.append("    {")
+                    mip_code.append(f"        if (l < 0.5) return tex2Dlod({sname}, float4(uv, 0.0, 0.0));")
+                    for lv in range(1, MIP_LEVELS):
+                        mip_code.append(f"        if (l < {lv}.5) return tex2Dlod({sname}__m{lv}, float4(uv, 0.0, 0.0));")
+                    mip_code.append(f"        return tex2Dlod({sname}__m{MIP_LEVELS}, float4(uv, 0.0, 0.0));")
+                    mip_code.append("    }")
+                    mip_code.append(f"    float4 {sname}__lod(float2 uv, float lod)")
+                    mip_code.append("    {")
+                    mip_code.append(f"        lod = clamp(lod, 0.0, {MIP_LEVELS}.0);")
+                    mip_code.append("        float l = floor(lod);")
+                    mip_code.append(f"        return lerp({sname}__lvl(uv, l), {sname}__lvl(uv, l + 1.0), lod - l);")
+                    mip_code.append("    }")
             w(f"namespace {ns}")
             w("{")
             out.extend(samplers(stage))
@@ -709,8 +772,8 @@ def _convert(preset, options, wd):
         rt = "" if (k == n - 1 and direct) else f" RenderTarget = T_P{k};"
         srgb = " SRGBWriteEnable = true;" if info.srgb and rt else ""
         for tn in pass_mips.get(k, []):
-            for lv in range(1, MIP_LEVELS + 1):
-                w(f"    pass {{ VertexShader = SFX_VS; PixelShader = SFX_PS_{tn}_M{lv}; RenderTarget = {tn}_M{lv}; }}")
+            for _, to in chain_steps[tn]:
+                w(f"    pass {{ VertexShader = SFX_VS; PixelShader = SFX_PS_{tn}_M{to}; RenderTarget = {tn}_M{to}; }}")
         w(f"    pass P{k} {{ VertexShader = P{k}_V::VS; PixelShader = P{k}_F::PS;{rt}{srgb} }}")
     if need_blit:
         rt = " RenderTarget = T_OUT;" if defringe_src == "T_OUT" else ""
