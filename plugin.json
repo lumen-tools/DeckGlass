@@ -1,10 +1,11 @@
 {
-  "name": "Reshadeck",
-  "author": "Jariullah Safi",
+  "name": "SlangDeck",
+  "author": "SlangDeck contributors",
   "flags": ["debug"],
+  "api_version": 1,
   "publish": {
-    "tags": ["control"],
-    "description": "A plugin for loading reshade shaders on steam deck",
-    "image": "https://github.com/safijari/reshadeck/raw/main/reshadeck.png"
+    "tags": ["display", "shaders"],
+    "description": "RetroArch slang shaders (CRT, LCD, NTSC ...) for every game, via gamescope ReShade.",
+    "image": ""
   }
 }

@@ -1,187 +1,285 @@
 import {
-    ButtonItem,
-    definePlugin,
-    DialogButton,
-    Menu,
-    MenuItem,
-    PanelSection,
-    PanelSectionRow,
-    ToggleField,
-    Router,
-    ServerAPI,
-    showContextMenu,
-    staticClasses,
-    Dropdown,
-    DropdownOption,
-    SingleDropdownOption,
-} from "decky-frontend-lib";
-import { VFC, useState, useEffect } from "react";
-import { MdWbShade } from "react-icons/md";
-import logo from "../assets/logo.png";
+  ButtonItem,
+  Dropdown,
+  DropdownOption,
+  PanelSection,
+  PanelSectionRow,
+  SliderField,
+  Router,
+  ToggleField,
+  staticClasses,
+} from "@decky/ui";
+import { callable, definePlugin } from "@decky/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MdMonitor } from "react-icons/md";
 
+type Preset = { key: string; label: string };
+type Group = { folder: string; presets: Preset[] };
+type Library = { library: string; groups: Group[] };
+type System = { id: string; label: string; w: number; h: number };
+type Param = { name: string; label: string; min: number; max: number; step: number; default: number; value: number };
+type Settings = {
+  enabled: boolean;
+  preset: string | null;
+  scale_mode: "system" | "manual";
+  system: string;
+  pixel_size: number;
+  only_in_game: boolean;
+  last_error: string | null;
+};
+type ApplyResult = { ok: boolean; error?: string; params: Param[] };
 
-class ReshadeckLogic {
-    serverAPI: ServerAPI;
-    dataTakenAt: number = Date.now();
-    screensaverActive: boolean = false;
+const getLibrary = callable<[], Library[]>("get_library");
+const getSystems = callable<[], System[]>("get_systems");
+const getSettings = callable<[], Settings>("get_settings");
+const updateSettings = callable<[Partial<Settings>], ApplyResult>("update_settings");
+const setParam = callable<[string, string, number], ApplyResult>("set_param");
+const resetParams = callable<[string], ApplyResult>("reset_params");
+const reapply = callable<[], ApplyResult>("reapply");
+const setInGame = callable<[boolean], ApplyResult>("set_in_game");
 
-    constructor(serverAPI: ServerAPI) {
-        this.serverAPI = serverAPI;
-    }
-
-    handleButtonInput = async (val: any[]) => {
-        if (!this.screensaverActive) {
-            return;
-        }
-        let cancel = false;
-        const { flSoftwareGyroDegreesPerSecondPitch,
-            flSoftwareGyroDegreesPerSecondYaw,
-            flSoftwareGyroDegreesPerSecondRoll,
-            ulButtons,
-            sLeftStickX,
-            sLeftStickY,
-            sRightStickX,
-            sRightStickY,
-        } = val[0];
-        if (ulButtons != 0) { cancel = true; }
-        if (Math.abs(sLeftStickX) > 5000 || Math.abs(sLeftStickY) > 5000 ||
-            Math.abs(sRightStickX) > 5000 || Math.abs(sRightStickY) > 5000) {
-            cancel = true;
-        }
-
-        if (!cancel && Date.now() - this.dataTakenAt < 1000) {
-            return;
-        }
-        this.dataTakenAt = Date.now();
-        let degrees = 10;
-        if (!cancel && Math.abs(flSoftwareGyroDegreesPerSecondPitch) > degrees ||
-            Math.abs(flSoftwareGyroDegreesPerSecondYaw) > degrees ||
-            Math.abs(flSoftwareGyroDegreesPerSecondRoll) > degrees) {
-            cancel = true;
-        }
-
-        if (cancel) {
-            await this.serverAPI.callPluginMethod("apply_shader", { "screensaver": false });
-            await this.serverAPI.toaster.toast({
-                title: "Waking Up Screen",
-                body: "Waking Up Screen",
-                duration: 100,
-                critical: true
-            });
-            this.screensaverActive = false;
-        }
-    }
-
-    handleSuspend = async (val: any) => {
-        await this.serverAPI.callPluginMethod("apply_shader", { "screensaver": false });
-    }
+declare global {
+  interface Window {
+    SteamClient: any;
+  }
 }
 
-const Content: VFC<{ serverAPI: ServerAPI, logic: ReshadeckLogic }> = ({ serverAPI, logic }) => {
-    const baseShader = { data: "None", label: "No Shader" } as SingleDropdownOption;
-    const baseScreensaver = { data: "None", label: "No Screensaver" } as SingleDropdownOption;
-    const [shader_list, set_shader_list] = useState<string[]>([]);
-    const [selectedShader, setSelectedShader] = useState<DropdownOption>(baseShader);
-    const [shaderOptions, setShaderOptions] = useState<DropdownOption[]>([baseShader]);
-    const [selectedScreenSaver, setSelectedScreenSaver] = useState<DropdownOption>(baseShader);
-    const [screenSaverOptions, setScreenSaverOptions] = useState<DropdownOption[]>([baseScreensaver]);
+const MANUAL = "__manual__";
 
-    const getShaderOptions = (le_list: string[], baseShaderOrSS: any) => {
-        let options: DropdownOption[] = [];
-        options.push(baseShaderOrSS);
-        for (let i = 0; i < le_list.length; i++) {
-            let option = { data: le_list[i], label: le_list[i] } as SingleDropdownOption;
-            options.push(option);
-        }
-        return options;
+function splitKey(key: string | null): { library: string; folder: string } | null {
+  if (!key) return null;
+  const i = key.indexOf("/");
+  const rel = key.slice(i + 1);
+  const j = rel.lastIndexOf("/");
+  return { library: key.slice(0, i), folder: j < 0 ? "." : rel.slice(0, j) };
+}
+
+function Content() {
+  const [library, setLibrary] = useState<Library[]>([]);
+  const [systems, setSystems] = useState<System[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [lib, setLib] = useState<string>("");
+  const [folder, setFolder] = useState<string>("");
+  const [params, setParams] = useState<Param[]>([]);
+  const [showParams, setShowParams] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const handle = (r: ApplyResult) => {
+    setError(r.ok ? null : r.error ?? "Unbekannter Fehler");
+    setParams(r.params ?? []);
+  };
+
+  const run = async (fn: () => Promise<ApplyResult>) => {
+    setBusy(true);
+    try {
+      handle(await fn());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
     }
+  };
 
-    const initState = async () => {
-        let shader_list = (await serverAPI.callPluginMethod("get_shader_list", {})).result as string[];
-        let screensaver_list = (await serverAPI.callPluginMethod("get_screensaver_list", {})).result as string[];
-        set_shader_list(shader_list)
-        setShaderOptions(getShaderOptions(shader_list, baseShader));
-        setScreenSaverOptions(getShaderOptions(screensaver_list, baseScreensaver));
+  useEffect(() => {
+    (async () => {
+      const [l, s, st] = await Promise.all([getLibrary(), getSystems(), getSettings()]);
+      setLibrary(l);
+      setSystems(s);
+      setSettings(st);
+      const sk = splitKey(st.preset);
+      const firstLib = sk?.library ?? l[0]?.library ?? "";
+      setLib(firstLib);
+      const libObj = l.find((x) => x.library === firstLib);
+      setFolder(sk?.folder ?? libObj?.groups[0]?.folder ?? "");
+      if (st.preset) await run(() => reapply());
+      else setError(st.last_error);
+    })();
+  }, []);
 
-        let curr = await serverAPI.callPluginMethod("get_current_shader", {});
-        setSelectedShader({ data: curr.result, label: (curr.result == "0" ? "None" : curr.result) } as SingleDropdownOption);
+  const change = async (c: Partial<Settings>) => {
+    setSettings((s) => (s ? { ...s, ...c } : s));
+    await run(() => updateSettings(c));
+  };
 
-        let currSS = await serverAPI.callPluginMethod("get_current_screensaver", {});
-        setSelectedScreenSaver({ data: currSS.result, label: (currSS.result == "0" ? "None" : currSS.result) } as SingleDropdownOption);
-    }
+  const libObj = library.find((x) => x.library === lib);
+  const groupObj = libObj?.groups.find((g) => g.folder === folder);
 
-    useEffect(() => {
-        initState();
-    }, []);
+  const libOptions: DropdownOption[] = library.map((l) => ({ data: l.library, label: l.library }));
+  const folderOptions: DropdownOption[] = (libObj?.groups ?? []).map((g) => ({
+    data: g.folder,
+    label: `${g.folder === "." ? "(Hauptordner)" : g.folder} (${g.presets.length})`,
+  }));
+  const presetOptions: DropdownOption[] = (groupObj?.presets ?? []).map((p) => ({ data: p.key, label: p.label }));
+  const scaleOptions: DropdownOption[] = useMemo(
+    () => [
+      ...systems.map((s) => ({ data: s.id, label: `${s.label} (${s.w}×${s.h})` })),
+      { data: MANUAL, label: "Manuell: Pixelgröße" },
+    ],
+    [systems]
+  );
 
+  if (!settings) {
     return (
-        <PanelSection title="Select Shader">
-            <PanelSectionRow>
-                <Dropdown
-                    menuLabel="Select shader"
-                    strDefaultLabel={selectedShader.label as string}
-                    rgOptions={shaderOptions}
-                    selectedOption={selectedShader}
-                    onChange={async (newSelectedShader: DropdownOption) => {
-                        await serverAPI.callPluginMethod("set_shader", { "shader_name": newSelectedShader.data });
-                    }}
-                />
-            </PanelSectionRow>
-            <PanelSectionRow>
-                <b>Select Screensaver</b>
-            </PanelSectionRow>
-            <PanelSectionRow>
-                <Dropdown
-                    menuLabel="Select screensaver"
-                    strDefaultLabel={selectedScreenSaver.label as string}
-                    rgOptions={screenSaverOptions}
-                    selectedOption={selectedScreenSaver}
-                    onChange={async (newSelectedScreenSaver: DropdownOption) => {
-                        await serverAPI.callPluginMethod("set_screensaver", { "shader_name": newSelectedScreenSaver.data });
-                        setSelectedScreenSaver(newSelectedScreenSaver.data);
-                    }}
-                />
-            </PanelSectionRow>
-            <PanelSectionRow>
-                <ButtonItem onClick={async () => {
-                    console.log(selectedScreenSaver);
-                    let ret = await serverAPI.callPluginMethod("apply_shader", { "screensaver": true });
-                    await serverAPI.toaster.toast({
-                        title: "Starting Screensaver",
-                        body: "Starting Screensaver",
-                        duration: 100,
-                        critical: true
-                    });
-                    setTimeout(() => {
-                        (logic as any).screensaverActive = true;
-                    }, 5000)
-                }
-                }>Start Screensaver</ButtonItem>
-            </PanelSectionRow>
-            <PanelSectionRow>
-                <div>Place any custom shaders in <pre>~/.local/share/gamescope</pre><pre>/reshade/Shaders</pre> so that the .fx files are in the root of the Shaders folder.</div>
-            </PanelSectionRow>
-            <PanelSectionRow>
-                <div>WARNING: Shaders can lead to dropped frames and possibly even severe performance problems.</div>
-            </PanelSectionRow>
-        </PanelSection>
+      <PanelSection>
+        <PanelSectionRow>Lade …</PanelSectionRow>
+      </PanelSection>
     );
-};
+  }
 
-export default definePlugin((serverApi: ServerAPI) => {
-    let logic = new ReshadeckLogic(serverApi);
-    let input_register = window.SteamClient.Input.RegisterForControllerStateChanges(logic.handleButtonInput);
-    let suspend_registers = [window.SteamClient.System.RegisterForOnSuspendRequest(logic.handleSuspend), window.SteamClient.System.RegisterForOnResumeFromSuspend(logic.handleSuspend)];
+  const currentLabel = settings.preset ? settings.preset.split("/").pop()?.replace(/\.slangp$/, "") : "—";
 
-    return {
-        title: <div className={staticClasses.Title}>Reshadeck</div>,
-        content: <Content serverAPI={serverApi} logic={logic} />,
-        icon: <MdWbShade />,
-        onDismount() {
-            input_register.unregister();
-            suspend_registers[0].unregister();
-            suspend_registers[1].unregister();
-        },
-        alwaysRender: true
-    };
+  const onParam = (p: Param, v: number) => {
+    setParams((ps) => ps.map((x) => (x.name === p.name ? { ...x, value: v } : x)));
+    const preset = settings.preset;
+    if (!preset) return;
+    clearTimeout(timers.current[p.name]);
+    timers.current[p.name] = setTimeout(() => run(() => setParam(preset, p.name, v)), 500);
+  };
+
+  return (
+    <>
+      <PanelSection>
+        <PanelSectionRow>
+          <ToggleField
+            label="Shader aktiv"
+            checked={settings.enabled}
+            disabled={busy}
+            onChange={(v) => change({ enabled: v })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Nur im Spiel"
+            description="Steam-Menüs bleiben ohne Shader"
+            checked={settings.only_in_game}
+            disabled={busy}
+            onChange={(v) => change({ only_in_game: v })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ fontSize: "12px" }}>
+            Aktuell: <b>{currentLabel}</b>
+            {busy ? " · wird umgewandelt …" : ""}
+          </div>
+        </PanelSectionRow>
+        {error && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "12px", color: "#ff7070", wordBreak: "break-word" }}>{error}</div>
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+
+      <PanelSection title="Shader">
+        <PanelSectionRow>
+          <Dropdown
+            menuLabel="Sammlung"
+            rgOptions={libOptions}
+            selectedOption={lib}
+            onChange={(o) => {
+              setLib(o.data);
+              const l = library.find((x) => x.library === o.data);
+              setFolder(l?.groups[0]?.folder ?? "");
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Dropdown menuLabel="Ordner" rgOptions={folderOptions} selectedOption={folder} onChange={(o) => setFolder(o.data)} />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <Dropdown
+            menuLabel="Preset"
+            strDefaultLabel="Preset wählen"
+            rgOptions={presetOptions}
+            selectedOption={settings.preset}
+            onChange={(o) => change({ preset: o.data, enabled: true })}
+          />
+        </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Quellauflösung">
+        <PanelSectionRow>
+          <Dropdown
+            menuLabel="System"
+            rgOptions={scaleOptions}
+            selectedOption={settings.scale_mode === "manual" ? MANUAL : settings.system}
+            onChange={(o) =>
+              o.data === MANUAL ? change({ scale_mode: "manual" }) : change({ scale_mode: "system", system: o.data })
+            }
+          />
+        </PanelSectionRow>
+        {settings.scale_mode === "manual" && (
+          <PanelSectionRow>
+            <SliderField
+              label="Pixelgröße"
+              description="Bildschirmpixel pro Original-Pixel"
+              min={1}
+              max={8}
+              step={0.05}
+              value={settings.pixel_size}
+              showValue
+              editableValue
+              onChange={(v) => {
+                setSettings((s) => (s ? { ...s, pixel_size: v } : s));
+                clearTimeout(timers.current.__px);
+                timers.current.__px = setTimeout(() => change({ pixel_size: v }), 500);
+              }}
+            />
+          </PanelSectionRow>
+        )}
+      </PanelSection>
+
+      {params.length > 0 && (
+        <PanelSection title={`Parameter (${params.length})`}>
+          <PanelSectionRow>
+            <ToggleField label="Parameter anzeigen" checked={showParams} onChange={setShowParams} />
+          </PanelSectionRow>
+          {showParams && (
+            <>
+              <PanelSectionRow>
+                <ButtonItem layout="below" disabled={busy} onClick={() => settings.preset && run(() => resetParams(settings.preset!))}>
+                  Auf Standard zurücksetzen
+                </ButtonItem>
+              </PanelSectionRow>
+              {params.map((p) =>
+                p.min === p.max ? null : (
+                  <PanelSectionRow key={p.name}>
+                    <SliderField
+                      label={p.label}
+                      min={p.min}
+                      max={p.max}
+                      step={p.step > 0 ? p.step : (p.max - p.min) / 100}
+                      value={p.value}
+                      showValue
+                      editableValue
+                      onChange={(v) => onParam(p, v)}
+                    />
+                  </PanelSectionRow>
+                )
+              )}
+            </>
+          )}
+        </PanelSection>
+      )}
+    </>
+  );
+}
+
+export default definePlugin(() => {
+  // Tell the backend whether a game is running, so the Steam UI can stay unshaded.
+  const report = () => setInGame(!!Router.MainRunningApp).catch(() => {});
+  report();
+  const reg = window.SteamClient?.GameSessions?.RegisterForAppLifetimeNotifications?.(() => {
+    setTimeout(report, 500);
+  });
+  return {
+    name: "SlangDeck",
+    titleView: <div className={staticClasses.Title}>SlangDeck</div>,
+    content: <Content />,
+    icon: <MdMonitor />,
+    onDismount() {
+      reg?.unregister?.();
+    },
+  };
 });

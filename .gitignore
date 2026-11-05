@@ -1,2 +1,7 @@
 node_modules/
-.env
+dist/
+out/
+__pycache__/
+*.pyc
+shaders/
+*.zip

@@ -1,0 +1,1 @@
+glslang c9fc655, SPIRV-Cross 57e4efc; built as static x86_64 Linux binaries from upstream sources (KhronosGroup).

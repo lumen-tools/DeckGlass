@@ -1,31 +1,39 @@
-# Reshadeck
-Reshade Shader Loader for Decky Plugin Loader for the handheld Steam Game Loader. It ships with a small curated set of shaders.
-More shaders can be added at the `~/.local/share/gamescope/reshade/Shaders` folder such that the `.fx` files are in the 
-root of the `Shaders` folder. Then you can pick and apply the shader using the plugin.
+# SlangDeck
 
-You can also designate shaders as a "screensaver" (one that blacks the screen out is included by default). Screensaver shaders start 
-with "SS_" in their name, are enabled by pushing the aptly labeled button, and will stop running if the Deck is moved, a button is pressed,
-trackpad or stick activity, or the Deck is put to suspend.
+Decky-Plugin, das **RetroArch-Shader (Slang-Presets)** auf das gesamte Spielbild des Steam Deck legt – für jedes Spiel und jeden Emulator, nicht nur in RetroArch. Inspiriert von [ShaderGlass](https://github.com/mausimus/ShaderGlass), aufgebaut auf [Reshadeck](https://github.com/safijari/Reshadeck).
 
-![Example Screenshot](reshadeck.png)
+## Funktionsweise
 
-# Caveats
-- Shaders can caused dropped frames in some rare cases and could also lead to severe performance degradation
-- Shaders will not be applied at startup
-- Screenshots will not contain the shader (but videos recorded via Decky Recorder will)
-- When in game, the QAM menu will not have the shader applied
-- When not in a game, the whole OS will have the shader applied
-- You can't change any shader uniforms at run time. You have to edit the shader and change the default values
-- Not all features of reshade are supported
-- Some shaders can cause the Deck to crash
+gamescope kann ReShade-Effekte (`.fx`) auf das Bild des laufenden Spiels anwenden. SlangDeck wandelt RetroArch-Presets (`.slangp`) direkt auf dem Deck in einen solchen Effekt um:
 
-# A note on Deck OLED Fringing Patterns
-The subpixel pattern of the Steam Deck OLED (Samsung screen at least), leads to some fringing that is visible to a small minority of people.
-It is possible to [largely eliminate this fringing](https://gist.github.com/safijari/1b936cbbdebe341fbe340bcfecb04450) using a shader. That 
-shader is included by default in this plugin.
+```
+.slangp/.slang ─► glslang ─► SPIR-V ─► SPIRV-Cross (HLSL) ─► slangfx ─► eine ReShade-.fx
+```
 
-# Places to find more shaders
+- Mehrere Durchläufe, Aliase, Feedback, `OriginalHistory`, LUT-Texturen und Parameter werden unterstützt.
+- **Quellauflösung:** Der erste Durchlauf rechnet das Spielbild auf die Originalauflösung des Systems herunter (z. B. PS2 640×448), damit Scanlines und Masken stimmen. Angenommen wird ein bildschirmfüllend skaliertes Bild (ohne Integer-Skalierung). Alternativ manuell über eine Pixelgröße.
+- Parameter lassen sich im Plugin einstellen; jede Änderung erzeugt eine neue `.fx`, die gamescope sofort lädt.
 
-https://github.com/Matsilagi/RSRetroArch/tree/main/Shaders
+## Shader
 
-https://framedsc.com/ReshadeGuides/shaderscatalogue.htm
+- **RetroArch:** die [libretro slang-shaders](https://github.com/libretro/slang-shaders) (ohne Mega Bezel).
+- **Eigene:** beliebige Slang-Presets nach `~/slangdeck-shaders/` kopieren (Ordnerstruktur mit `#include`s und Texturen beibehalten).
+
+## Einschränkungen
+
+- Screenshots enthalten den Shader nicht.
+- Schwere Presets (z. B. crt-royale) kosten viel GPU-Leistung.
+- Ein kleiner Teil der Presets lässt sich nicht umwandeln (z. B. Matrix-Ternaries, HDR-Spezialfälle); der Fehler wird im Plugin angezeigt.
+
+## Bauen
+
+```bash
+pnpm install
+./package.sh /pfad/zu/slang-shaders [/pfad/zu/retro-crisis]
+```
+
+Ergebnis: `out/SlangDeck-<version>.zip`, installierbar über Decky (Entwicklermodus → „Install Plugin from ZIP“).
+
+## Lizenz
+
+GPL-3.0 (siehe `LICENSE`), wie Reshadeck. Mitgelieferte Werkzeuge: glslang und SPIRV-Cross (Lizenzen in `slangfx/bin/licenses/`). Die Shader stehen unter den Lizenzen ihrer jeweiligen Autoren.
