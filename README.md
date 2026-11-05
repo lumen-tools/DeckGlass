@@ -14,6 +14,7 @@ gamescope can apply ReShade effects (`.fx`) to the image of the running game. De
 
 - Multiple passes, aliases, feedback, `OriginalHistory`, LUT textures and parameters are supported.
 - **Source resolution:** the first pass scales the game image down by a pixel size, so scanlines and masks line up with the game's lines. Pick the system, then set **Black bars top & bottom**: off if the emulator fills the screen height (800 lines), on if it shows a 16:9 area with bars (720 lines). Pixel sizes are round (e.g. SNES 4× / 3×, PS2 2× / 1.5×), because round values keep every scanline equally thick. Both choices can be stored per game; a manual pixel size is available too.
+- **Bilinear filtering** (on by default): smooths the game image while it is scaled down to the source resolution – this usually looks closer to RetroArch. Can be turned off, also per game.
 - Every change writes a new `.fx` that gamescope loads immediately.
 
 ## Shaders
@@ -38,7 +39,7 @@ Presets are picked in a file browser, like in RetroArch, with three top folders:
 - Screenshots do not include the shader.
 - Heavy presets (e.g. crt-royale) cost a lot of GPU time.
 - A few presets cannot be converted (e.g. matrix ternaries); the error is shown in the plugin.
-- gamescope does not support mipmaps, so `mipmap_input` is ignored.
+- gamescope does not support mipmaps; DeckGlass emulates the mip levels that shaders read explicitly (e.g. crt-geom-deluxe's average brightness).
 
 ## Releases
 

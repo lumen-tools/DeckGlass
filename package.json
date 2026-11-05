@@ -1,6 +1,6 @@
 {
   "name": "deckglass",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "RetroArch slang shaders for the whole Steam Deck screen, via gamescope ReShade",
   "type": "module",
   "scripts": {

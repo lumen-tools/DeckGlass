@@ -121,6 +121,32 @@ def _clamp_param_indices(code):
     return re.sub(r"\b(\w+)\[([^\[\]]+)\]", rep, code)
 
 
+MIP_LEVELS = 11  # enough for textures up to 2048 pixels
+
+
+def _rewrite_lod_reads(code, sampler):
+    """tex2Dlod(sampler, float4(uv, 0.0, lod)) -> sampler__lod(uv, lod), which reads the
+    emulated mip chain. Returns (code, used)."""
+    from .xlate import _find_close, _split_args
+    pat = re.compile(r"\btex2Dlod\(\s*" + re.escape(sampler) + r"\s*,")
+    out, pos, used = "", 0, False
+    while True:
+        m = pat.search(code, pos)
+        if not m:
+            return out + code[pos:], used
+        open_i = code.index("(", m.start())
+        close = _find_close(code, open_i)
+        args = _split_args(code[open_i + 1:close])
+        mm = re.match(r"float4\((.*)\)$", args[1].strip(), re.S) if len(args) == 2 else None
+        inner = _split_args(mm.group(1)) if mm else []
+        if len(inner) == 3:
+            out += code[pos:m.start()] + f"{sampler}__lod({inner[0]}, {inner[2]})"
+            used = True
+        else:
+            out += code[pos:close + 1]
+        pos = close + 1
+
+
 def _fix_literal_swizzles(code):
     return re.sub(r"(?<![\w.])(\d+\.\d*(?:[eE][+-]?\d+)?f?|\d+u?)\.([xyzw]{1,4}|[rgba]{1,4})\b", r"(\1).\2", code)
 
@@ -128,7 +154,8 @@ def _fix_literal_swizzles(code):
 # ----------------------------------------------------------------------------- converter
 
 class Options:
-    def __init__(self, native=None, pixel_size=None, params=None, lut_dir="slangfx", defringe=False):
+    def __init__(self, native=None, pixel_size=None, params=None, lut_dir="slangfx", defringe=False,
+                 bilinear=True):
         """native: (w, h) of the emulated system; the source image is assumed to be
         scaled to fit the screen (aspect preserved, non-integer). pixel_size: manual
         factor (screen pixels per source pixel). Either may be None -> pixel_size 1."""
@@ -137,6 +164,7 @@ class Options:
         self.params = params or {}
         self.lut_dir = lut_dir
         self.defringe = defringe  # append the Deck OLED (Samsung panel) defringe pass
+        self.bilinear = bilinear  # read the game image with bilinear filtering when scaling it down
 
 
 class PassInfo:
@@ -377,7 +405,9 @@ def _convert(preset, options, wd):
         return ""
 
     w("texture T_BACK : COLOR;")
-    w("sampler2D S_BACK { Texture = T_BACK; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };")
+    back_filter = "LINEAR" if options.bilinear else "POINT"
+    w(f"sampler2D S_BACK {{ Texture = T_BACK; MagFilter = {back_filter}; MinFilter = {back_filter}; MipFilter = POINT; "
+      "AddressU = CLAMP; AddressV = CLAMP; };")
     w(f"texture T_ORIG {{ Width = SFX_ORIG_W; Height = SFX_ORIG_H; Format = RGBA8;{mip('T_ORIG')} }};")
     for k in range(1, history_max + 1):
         w(f"texture T_H{k} {{ Width = SFX_ORIG_W; Height = SFX_ORIG_H; Format = RGBA8;{mip(f'T_H{k}')} }};")
@@ -433,6 +463,39 @@ def _convert(preset, options, wd):
         w("texture T_OUT { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA8; };")
     if defringe_src:
         out.extend(defringe_code(defringe_src))
+    w("")
+
+    # gamescope has no mipmaps. Shaders that read explicit mip levels of a
+    # mipmap_input texture (e.g. crt-geom-deluxe's average brightness at LOD 9) get an
+    # emulated chain: each level halves the previous one with a 2x2 box filter.
+    mip_chains = {}        # texture name -> (width macro, height macro)
+    pass_mips = {}         # pass index -> [texture names whose chain must be built first]
+    for info in infos:
+        if not info.p.mipmap_input:
+            continue
+        for st in (info.vs, info.fs):
+            for t in st.textures:
+                ref = info.tex_refs[t]
+                if ref[0] == "lut" or not re.search(r"\btex2Dlod\(\s*" + re.escape(t) + r"\s*,", st.body):
+                    continue
+                tn = tex_name(ref)
+                if tn not in mip_chains:
+                    mip_chains[tn] = size_of(ref)
+                pass_mips.setdefault(info.index, [])
+                if tn not in pass_mips[info.index]:
+                    pass_mips[info.index].append(tn)
+    for tn, (bw, bh) in mip_chains.items():
+        for lv in range(1, MIP_LEVELS + 1):
+            d = 2 ** lv
+            fmt = "RGBA16F"
+            w(f"texture {tn}_M{lv} {{ Width = (({bw}) + {d - 1}) / {d}; Height = (({bh}) + {d - 1}) / {d}; Format = {fmt}; }};")
+            prev = tn if lv == 1 else f"{tn}_M{lv - 1}"
+            w(f"sampler2D S_{tn}_R{lv} {{ Texture = {prev}; MagFilter = LINEAR; MinFilter = LINEAR; MipFilter = POINT; "
+              "AddressU = CLAMP; AddressV = CLAMP; };")
+            w(f"float4 SFX_PS_{tn}_M{lv}(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target")
+            w("{")
+            w(f"    return tex2D(S_{tn}_R{lv}, uv);")
+            w("}")
     w("")
 
     # passes
@@ -538,9 +601,36 @@ def _convert(preset, options, wd):
             body = _clamp_param_indices(replace_identifiers(body, uniform_map(stage)))
             body = _fix_literal_swizzles(rename_reserved(body))
             main = _fix_literal_swizzles(rename_reserved(stage.main_body))
+            mip_code = []
+            for t in stage.textures:
+                ref = info.tex_refs[t]
+                tn = tex_name(ref) if ref[0] != "lut" else None
+                if tn not in mip_chains or tn not in pass_mips.get(k, []):
+                    continue
+                sname = rename_reserved(t)
+                body, used = _rewrite_lod_reads(body, sname)
+                if not used:
+                    continue
+                for lv in range(1, MIP_LEVELS + 1):
+                    mip_code.append(f"    sampler2D {sname}__m{lv} {{ Texture = {tn}_M{lv}; MagFilter = LINEAR; "
+                                    "MinFilter = LINEAR; MipFilter = POINT; AddressU = CLAMP; AddressV = CLAMP; };")
+                mip_code.append(f"    float4 {sname}__lvl(float2 uv, float l)")
+                mip_code.append("    {")
+                mip_code.append(f"        if (l < 0.5) return tex2Dlod({sname}, float4(uv, 0.0, 0.0));")
+                for lv in range(1, MIP_LEVELS):
+                    mip_code.append(f"        if (l < {lv}.5) return tex2Dlod({sname}__m{lv}, float4(uv, 0.0, 0.0));")
+                mip_code.append(f"        return tex2Dlod({sname}__m{MIP_LEVELS}, float4(uv, 0.0, 0.0));")
+                mip_code.append("    }")
+                mip_code.append(f"    float4 {sname}__lod(float2 uv, float lod)")
+                mip_code.append("    {")
+                mip_code.append(f"        lod = clamp(lod, 0.0, {MIP_LEVELS}.0);")
+                mip_code.append("        float l = floor(lod);")
+                mip_code.append(f"        return lerp({sname}__lvl(uv, l), {sname}__lvl(uv, l + 1.0), lod - l);")
+                mip_code.append("    }")
             w(f"namespace {ns}")
             w("{")
             out.extend(samplers(stage))
+            out.extend(mip_code)
             w(body)
             if stage.stage == "vertex":
                 params_sig = ["in uint _sfx_id : SV_VertexID", "out float4 _sfx_pos : SV_Position"]
@@ -618,6 +708,9 @@ def _convert(preset, options, wd):
         k = info.index
         rt = "" if (k == n - 1 and direct) else f" RenderTarget = T_P{k};"
         srgb = " SRGBWriteEnable = true;" if info.srgb and rt else ""
+        for tn in pass_mips.get(k, []):
+            for lv in range(1, MIP_LEVELS + 1):
+                w(f"    pass {{ VertexShader = SFX_VS; PixelShader = SFX_PS_{tn}_M{lv}; RenderTarget = {tn}_M{lv}; }}")
         w(f"    pass P{k} {{ VertexShader = P{k}_V::VS; PixelShader = P{k}_F::PS;{rt}{srgb} }}")
     if need_blit:
         rt = " RenderTarget = T_OUT;" if defringe_src == "T_OUT" else ""

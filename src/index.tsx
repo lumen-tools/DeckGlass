@@ -14,7 +14,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { callable, definePlugin } from "@decky/api";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MdMonitor } from "react-icons/md";
 
 // ------------------------------------------------------------------ types & backend
@@ -45,6 +45,7 @@ type Settings = {
   system: string;
   pixel_size: number;
   game_height: number;
+  bilinear: boolean;
   only_in_game: boolean;
   is_oled: boolean;
   oled_defringe: boolean;
@@ -162,6 +163,43 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
               : "This folder is empty."}
           </div>
         )}
+      </Focusable>
+    </ModalRoot>
+  );
+}
+
+// ------------------------------------------------------------------ system picker
+
+const systemLabel = (s: System) =>
+  s.px800 === s.px720
+    ? `${s.label} (${s.w}×${s.h}) · ${s.px800}×`
+    : `${s.label} (${s.w}×${s.h}) · 800p ${s.px800}× · 720p ${s.px720}×`;
+
+function SystemPicker({
+  systems,
+  current,
+  closeModal,
+}: {
+  systems: System[];
+  current: string;
+  closeModal?: () => void;
+}) {
+  const choose = async (id: string) => {
+    closeModal?.();
+    await updateSettings({ scale_mode: "system", system: id });
+    notifyChanged();
+  };
+  return (
+    <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
+      <div style={titleStyle}>Choose System</div>
+      <div style={subtitleStyle}>Pixel size for games that fill the screen height (800p) or show black bars (720p)</div>
+      <Focusable style={{ maxHeight: "60vh", overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        {systems.map((s) => (
+          <DialogButton key={s.id} style={rowStyle} onClick={() => choose(s.id)}>
+            {s.id === current ? "✓  " : ""}
+            {systemLabel(s)}
+          </DialogButton>
+        ))}
       </Focusable>
     </ModalRoot>
   );
@@ -289,17 +327,7 @@ function Content() {
     { data: "manual", label: "Manual" },
   ];
   const bars = settings?.game_height === 720;
-  const systemOptions: DropdownOption[] = useMemo(
-    () =>
-      systems.map((s) => ({
-        data: s.id,
-        label:
-          s.px800 === s.px720
-            ? `${s.label} (${s.w}×${s.h}) · ${s.px800}×`
-            : `${s.label} (${s.w}×${s.h}) · 800p ${s.px800}× · 720p ${s.px720}×`,
-      })),
-    [systems]
-  );
+
 
   if (!settings || !library) {
     return (
@@ -319,7 +347,7 @@ function Content() {
           <ToggleField
             label="Enable shader"
             checked={settings.enabled}
-            disabled={busy || !settings.preset}
+            disabled={!settings.preset}
             onChange={(v) => change({ enabled: v })}
           />
         </PanelSectionRow>
@@ -328,7 +356,6 @@ function Content() {
             label="Only in games"
             description="Keep the Steam menus unshaded"
             checked={settings.only_in_game}
-            disabled={busy}
             onChange={(v) => change({ only_in_game: v })}
           />
         </PanelSectionRow>
@@ -338,7 +365,6 @@ function Content() {
               label="OLED defringe"
               description="Reduces colour fringing on the Deck OLED screen"
               checked={settings.oled_defringe}
-              disabled={busy}
               onChange={(v) => change({ oled_defringe: v })}
             />
           </PanelSectionRow>
@@ -366,7 +392,6 @@ function Content() {
                   : `Turn on to give ${settings.app_name ?? "this game"} its own settings`
               }
               checked={settings.profile_active}
-              disabled={busy}
               onChange={async (v) => {
                 await run(() => setProfile(v));
                 await refresh();
@@ -386,7 +411,6 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
-            disabled={busy}
             onClick={async () => {
               // re-scan so presets copied into the Custom folder show up right away
               const fresh = await getLibrary().catch(() => library);
@@ -400,7 +424,7 @@ function Content() {
         <PanelSectionRow>
           <ButtonItem
             layout="below"
-            disabled={busy || !settings.preset}
+            disabled={!settings.preset}
             onClick={() => settings.preset && showModal(<ParamDialog preset={settings.preset} title={label} />)}
           >
             Parameters …
@@ -410,21 +434,39 @@ function Content() {
 
       <PanelSection title="Source Resolution">
         <PanelSectionRow>
+          <ToggleField
+            label="Bilinear filtering"
+            description="Smooths the game image before the shader – usually looks closer to RetroArch"
+            checked={settings.bilinear}
+            onChange={(v) => change({ bilinear: v })}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
           <Dropdown
             menuLabel="Source Resolution"
             rgOptions={modeOptions}
             selectedOption={settings.scale_mode}
-            onChange={(o) => change({ scale_mode: o.data })}
+            onChange={(o) => {
+              if (o.data === "system") {
+                // go straight to the list of systems
+                showModal(<SystemPicker systems={systems} current={settings.system} />);
+              } else {
+                change({ scale_mode: o.data });
+              }
+            }}
           />
         </PanelSectionRow>
         {settings.scale_mode === "system" && (
           <PanelSectionRow>
-            <Dropdown
-              menuLabel="System (pixel size)"
-              rgOptions={systemOptions}
-              selectedOption={settings.system}
-              onChange={(o) => change({ system: o.data })}
-            />
+            <ButtonItem
+              layout="below"
+              onClick={() => showModal(<SystemPicker systems={systems} current={settings.system} />)}
+            >
+              {(() => {
+                const s = systems.find((x) => x.id === settings.system);
+                return s ? systemLabel(s) : "Choose System …";
+              })()}
+            </ButtonItem>
           </PanelSectionRow>
         )}
         {settings.scale_mode === "system" && (
@@ -437,7 +479,6 @@ function Content() {
                   : "Off: the game fills the screen height (800 lines)"
               }
               checked={bars}
-              disabled={busy}
               onChange={(v) => change({ game_height: v ? 720 : 800 })}
             />
           </PanelSectionRow>

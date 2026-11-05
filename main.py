@@ -82,13 +82,14 @@ DEFAULT_SETTINGS = {
     "system": "snes",
     "pixel_size": 3.0,
     "game_height": 800,      # 800 = game fills the screen height, 720 = 16:9 area with bars
+    "bilinear": True,        # bilinear filtering when the game image is scaled down
     "params": {},            # preset key -> {name: value}
     "only_in_game": True,    # keep the Steam UI untouched
     "oled_defringe": False,  # Deck OLED only: reduce colour fringing (device setting, not per game)
     "profiles": {},          # Steam app id -> per-game copy of PROFILE_KEYS (+ "name")
 }
 # Settings that a per-game profile overrides. "only_in_game" stays global.
-PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "params")
+PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "bilinear", "params")
 
 
 def _xprop_set(value):
@@ -349,6 +350,7 @@ class Plugin:
             raise ConvertError("Preset not found")
         opts = Plugin._options(key)
         opts.defringe = Plugin._defringe()
+        opts.bilinear = bool(Plugin._active().get("bilinear", True))
         tag = hashlib.sha1(key.encode()).hexdigest()[:10]
         opts.lut_dir = f"{LUT_ROOT}/{tag}"
         slangfx_build.CACHE_DIR = CACHE_DIR
@@ -442,7 +444,7 @@ class Plugin:
             if changes.get("enabled") or "preset" in changes:
                 Plugin.last_error = None
             target = Plugin._active()
-            for k in ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height"):
+            for k in ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "bilinear"):
                 if k in changes:
                     target[k] = changes[k]
             if "oled_defringe" in changes:
