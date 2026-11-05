@@ -40,32 +40,32 @@ LIBRARIES = [
     ("RetroCrisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
 ]
 
-# Native resolutions of common systems, with the pixel size used for them.
-# Emulators on the Deck normally show the game in a 1280x720 area (16:9, with bars on
-# the 16:10 screen), so the pixel size is based on 720 lines: 720 / 240 = 3,
-# 720 / 480 = 1.5, 720 / 144 = 5. Where that is not round (SNES: 720 / 224 = 3.21) the
-# nearest whole number is used, because round values keep every scanline equally thick.
+# Native resolutions of common systems, with the pixel size used for them. What counts
+# is how many screen lines the emulator uses for the game: 800 when it fills the height
+# of the 16:10 screen, 720 when it shows a 16:9 area with bars at the top and bottom.
+# Pixel size = lines / system lines, rounded to a whole number where it is not exact
+# (x.5 only where exact), because round values keep every scanline equally thick.
 SYSTEMS = [
-    {"id": "nes", "label": "NES / Famicom", "w": 256, "h": 240, "px": 3},
-    {"id": "snes", "label": "SNES", "w": 256, "h": 224, "px": 3},
-    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224, "px": 3},
-    {"id": "sms", "label": "Master System", "w": 256, "h": 192, "px": 4},
-    {"id": "pce", "label": "PC Engine", "w": 256, "h": 232, "px": 3},
-    {"id": "n64", "label": "Nintendo 64", "w": 320, "h": 240, "px": 3},
-    {"id": "psx", "label": "PlayStation", "w": 320, "h": 240, "px": 3},
-    {"id": "psx480", "label": "PlayStation (480i)", "w": 640, "h": 480, "px": 1.5},
-    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224, "px": 3},
-    {"id": "dc", "label": "Dreamcast", "w": 640, "h": 480, "px": 1.5},
-    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448, "px": 1.5},
-    {"id": "gc", "label": "GameCube / Wii", "w": 640, "h": 480, "px": 1.5},
-    {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224, "px": 3},
-    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144, "px": 5},
-    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160, "px": 4.5},
-    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192, "px": 4},
-    {"id": "psp", "label": "PSP", "w": 480, "h": 272, "px": 2.5},
-    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144, "px": 5},
-    {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152, "px": 5},
-    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144, "px": 5},
+    {"id": "nes", "label": "NES / Famicom", "w": 256, "h": 240, "px800": 3, "px720": 3},
+    {"id": "snes", "label": "SNES", "w": 256, "h": 224, "px800": 4, "px720": 3},
+    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224, "px800": 4, "px720": 3},
+    {"id": "sms", "label": "Master System", "w": 256, "h": 192, "px800": 4, "px720": 4},
+    {"id": "pce", "label": "PC Engine", "w": 256, "h": 232, "px800": 3, "px720": 3},
+    {"id": "n64", "label": "Nintendo 64", "w": 320, "h": 240, "px800": 3, "px720": 3},
+    {"id": "psx", "label": "PlayStation", "w": 320, "h": 240, "px800": 3, "px720": 3},
+    {"id": "psx480", "label": "PlayStation (480i)", "w": 640, "h": 480, "px800": 1.5, "px720": 1.5},
+    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224, "px800": 4, "px720": 3},
+    {"id": "dc", "label": "Dreamcast", "w": 640, "h": 480, "px800": 1.5, "px720": 1.5},
+    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448, "px800": 2, "px720": 1.5},
+    {"id": "gc", "label": "GameCube / Wii", "w": 640, "h": 480, "px800": 1.5, "px720": 1.5},
+    {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224, "px800": 3, "px720": 3},
+    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144, "px800": 6, "px720": 5},
+    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160, "px800": 5, "px720": 4.5},
+    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192, "px800": 4, "px720": 4},
+    {"id": "psp", "label": "PSP", "w": 480, "h": 272, "px800": 2.5, "px720": 2.5},
+    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144, "px800": 6, "px720": 5},
+    {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152, "px800": 5, "px720": 5},
+    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144, "px800": 6, "px720": 5},
 ]
 SYSTEM_BY_ID = {s["id"]: s for s in SYSTEMS}
 
@@ -75,13 +75,14 @@ DEFAULT_SETTINGS = {
     "scale_mode": "system",  # "system" | "manual"
     "system": "snes",
     "pixel_size": 3.0,
+    "game_height": 800,      # 800 = game fills the screen height, 720 = 16:9 area with bars
     "params": {},            # preset key -> {name: value}
     "only_in_game": True,    # keep the Steam UI untouched
     "oled_defringe": False,  # Deck OLED only: reduce colour fringing (device setting, not per game)
     "profiles": {},          # Steam app id -> per-game copy of PROFILE_KEYS (+ "name")
 }
 # Settings that a per-game profile overrides. "only_in_game" stays global.
-PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "params")
+PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "params")
 
 
 def _xprop_set(value):
@@ -298,7 +299,8 @@ class Plugin:
         if s.get("scale_mode") == "manual":
             return Options(pixel_size=float(s.get("pixel_size") or 1.0), params=params)
         sysd = SYSTEM_BY_ID.get(s.get("system"), SYSTEM_BY_ID["snes"])
-        return Options(pixel_size=float(sysd["px"]), params=params)
+        px = sysd["px720"] if int(s.get("game_height") or 800) == 720 else sysd["px800"]
+        return Options(pixel_size=float(px), params=params)
 
     @staticmethod
     def _defringe():
@@ -404,7 +406,7 @@ class Plugin:
             if changes.get("enabled") or "preset" in changes:
                 Plugin.last_error = None
             target = Plugin._active()
-            for k in ("enabled", "preset", "scale_mode", "system", "pixel_size"):
+            for k in ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height"):
                 if k in changes:
                     target[k] = changes[k]
             if "oled_defringe" in changes:

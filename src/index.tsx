@@ -21,7 +21,7 @@ import { MdMonitor } from "react-icons/md";
 
 type Preset = { key: string; label: string };
 type Folder = { name: string; folders: Folder[]; presets: Preset[] };
-type System = { id: string; label: string; w: number; h: number; px: number };
+type System = { id: string; label: string; w: number; h: number; px800: number; px720: number };
 type ParamOption = { value: number; label: string };
 type Param = {
   name: string;
@@ -44,6 +44,7 @@ type Settings = {
   scale_mode: "system" | "manual";
   system: string;
   pixel_size: number;
+  game_height: number;
   only_in_game: boolean;
   is_oled: boolean;
   oled_defringe: boolean;
@@ -278,13 +279,14 @@ function Content() {
     { data: "system", label: "Presets" },
     { data: "manual", label: "Manual" },
   ];
+  const bars = settings?.game_height === 720;
   const systemOptions: DropdownOption[] = useMemo(
     () =>
       systems.map((s) => ({
         data: s.id,
-        label: `${s.label} (${s.w}×${s.h}) – ${s.px}×`,
+        label: `${s.label} (${s.w}×${s.h}) – ${bars ? s.px720 : s.px800}×`,
       })),
-    [systems]
+    [systems, bars]
   );
 
   if (!settings || !library) {
@@ -405,6 +407,21 @@ function Content() {
               rgOptions={systemOptions}
               selectedOption={settings.system}
               onChange={(o) => change({ system: o.data })}
+            />
+          </PanelSectionRow>
+        )}
+        {settings.scale_mode === "system" && (
+          <PanelSectionRow>
+            <ToggleField
+              label="Black bars top & bottom"
+              description={
+                bars
+                  ? "On: the emulator shows a 16:9 area (720 lines)"
+                  : "Off: the game fills the screen height (800 lines)"
+              }
+              checked={bars}
+              disabled={busy}
+              onChange={(v) => change({ game_height: v ? 720 : 800 })}
             />
           </PanelSectionRow>
         )}

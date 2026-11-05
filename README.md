@@ -13,7 +13,7 @@ gamescope can apply ReShade effects (`.fx`) to the image of the running game. De
 ```
 
 - Multiple passes, aliases, feedback, `OriginalHistory`, LUT textures and parameters are supported.
-- **Source resolution:** the first pass scales the game image down by a pixel size, so scanlines and masks line up with the game's lines. System presets assume the usual 1280×720 game area on the Deck (16:9 with bars on the 16:10 screen) and use round pixel sizes: 720 / 240 lines = 3×, 720 / 480 = 1.5×, 720 / 144 = 5×; where the exact value is not round (SNES: 3.21) the nearest whole number is used, because round values keep every scanline equally thick. A manual pixel size is available too.
+- **Source resolution:** the first pass scales the game image down by a pixel size, so scanlines and masks line up with the game's lines. Pick the system, then set **Black bars top & bottom**: off if the emulator fills the screen height (800 lines), on if it shows a 16:9 area with bars (720 lines). Pixel sizes are round (e.g. SNES 4× / 3×, PS2 2× / 1.5×), because round values keep every scanline equally thick. Both choices can be stored per game; a manual pixel size is available too.
 - Every change writes a new `.fx` that gamescope loads immediately.
 
 ## Shaders
