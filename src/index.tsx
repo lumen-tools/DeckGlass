@@ -284,9 +284,12 @@ function Content() {
     () =>
       systems.map((s) => ({
         data: s.id,
-        label: `${s.label} (${s.w}×${s.h}) – ${bars ? s.px720 : s.px800}×`,
+        label:
+          s.px800 === s.px720
+            ? `${s.label} (${s.w}×${s.h}) · ${s.px800}×`
+            : `${s.label} (${s.w}×${s.h}) · 800p ${s.px800}× · 720p ${s.px720}×`,
       })),
-    [systems, bars]
+    [systems]
   );
 
   if (!settings || !library) {
