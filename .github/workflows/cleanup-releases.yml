@@ -1,0 +1,33 @@
+name: Clean up old releases
+
+# Started by hand: deletes every release and tag except the one given.
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Tag to keep (e.g. v0.3.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete other releases and tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          gh release view "$KEEP" --repo "$GITHUB_REPOSITORY" >/dev/null || { echo "::error::$KEEP does not exist"; exit 1; }
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName'); do
+            [ "$tag" = "$KEEP" ] && continue
+            echo "deleting release $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done
+          for tag in $(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" --jq '.[].ref | sub("refs/tags/"; "")'); do
+            [ "$tag" = "$KEEP" ] && continue
+            echo "deleting tag $tag"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag"
+          done
