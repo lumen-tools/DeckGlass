@@ -21,7 +21,7 @@ import { MdMonitor } from "react-icons/md";
 
 type Preset = { key: string; label: string };
 type Folder = { name: string; folders: Folder[]; presets: Preset[] };
-type System = { id: string; label: string; w: number; h: number; px800: number; px720: number };
+type System = { id: string; label: string; w: number; h: number };
 type ParamOption = { value: number; label: string };
 type Param = {
   name: string;
@@ -170,10 +170,16 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
 
 // ------------------------------------------------------------------ system picker
 
-const systemLabel = (s: System) =>
-  s.px800 === s.px720
-    ? `${s.label} (${s.w}×${s.h}) · ${s.px800}×`
-    : `${s.label} (${s.w}×${s.h}) · 800p ${s.px800}× · 720p ${s.px720}×`;
+/** Pixel size for a game picture of `lines` height on the 1280-wide Deck screen. */
+const factorFor = (s: System, lines: number) => (s.w ? Math.min(1280 / s.w, lines / s.h) : lines / s.h);
+const fmt = (f: number) => `${Math.round(f * 100) / 100}×`;
+const systemLabel = (s: System) => {
+  const res = s.w ? ` (${s.w}×${s.h})` : "";
+  const a = factorFor(s, 720);
+  const b = factorFor(s, 800);
+  const px = Math.abs(a - b) < 0.005 ? fmt(a) : `720p ${fmt(a)} · 800p ${fmt(b)}`;
+  return `${s.label}${res} · ${px}`;
+};
 
 function SystemPicker({
   systems,
@@ -192,7 +198,7 @@ function SystemPicker({
   return (
     <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
       <div style={titleStyle}>Choose System</div>
-      <div style={subtitleStyle}>Pixel size for games that fill the screen height (800p) or show black bars (720p)</div>
+      <div style={subtitleStyle}>The pixel size follows from the height of the game picture (720 or 800 lines)</div>
       <Focusable style={{ maxHeight: "60vh", overflowY: "auto", display: "flex", flexDirection: "column" }}>
         {systems.map((s) => (
           <DialogButton key={s.id} style={rowStyle} onClick={() => choose(s.id)}>
@@ -475,8 +481,8 @@ function Content() {
               label="Black bars top & bottom"
               description={
                 bars
-                  ? "On: the emulator shows a 16:9 area (720 lines)"
-                  : "Off: the game fills the screen height (800 lines)"
+                  ? "On: the game picture is 720 lines tall inside an 800-line image"
+                  : "Only needed if the emulator draws the bars itself"
               }
               checked={bars}
               onChange={(v) => change({ game_height: v ? 720 : 800 })}

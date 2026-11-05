@@ -187,7 +187,7 @@ def _fix_literal_swizzles(code):
 
 class Options:
     def __init__(self, native=None, pixel_size=None, params=None, lut_dir="slangfx", defringe=False,
-                 bilinear=True):
+                 bilinear=True, bars=False):
         """native: (w, h) of the emulated system; the source image is assumed to be
         scaled to fit the screen (aspect preserved, non-integer). pixel_size: manual
         factor (screen pixels per source pixel). Either may be None -> pixel_size 1."""
@@ -197,6 +197,9 @@ class Options:
         self.lut_dir = lut_dir
         self.defringe = defringe  # append the Deck OLED (Samsung panel) defringe pass
         self.bilinear = bilinear  # read the game image with bilinear filtering when scaling it down
+        # native=(w, h): w may be 0 for "height only" (TV systems: 240 or 480 lines).
+        # bars: the emulator draws a 720-line picture with bars into a taller buffer.
+        self.bars = bars
 
 
 class PassInfo:
@@ -409,15 +412,31 @@ def _convert(preset, options, wd):
     w(f"// Preset: {os.path.basename(preset.path)}")
     w("")
     if options.native:
+        # The pixel size is derived from the real size of the game image gamescope hands
+        # over (BUFFER_WIDTH x BUFFER_HEIGHT), so it is right whether the emulator renders
+        # 720 or 800 lines: the source grid gets exactly `nh` lines of game picture.
         nw, nh = options.native
-        w(f"// source image: {nw}x{nh}, scaled to fit the screen")
-        w(f"#if BUFFER_WIDTH * {nh} <= BUFFER_HEIGHT * {nw}")
-        w(f"  #define SFX_ORIG_W {nw}")
-        w(f"  #define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nw} + BUFFER_WIDTH) / (2 * BUFFER_WIDTH))")
-        w("#else")
-        w(f"  #define SFX_ORIG_W ((BUFFER_WIDTH * {2 * nh} + BUFFER_HEIGHT) / (2 * BUFFER_HEIGHT))")
-        w(f"  #define SFX_ORIG_H {nh}")
-        w("#endif")
+        w(f"// source image: {nw or 'any'}x{nh}, scaled to fit the game picture")
+        if options.bars:
+            w("#if BUFFER_HEIGHT > 720")
+            w("  #define SFX_CONTENT_H 720")
+            w("#else")
+            w("  #define SFX_CONTENT_H BUFFER_HEIGHT")
+            w("#endif")
+        else:
+            w("#define SFX_CONTENT_H BUFFER_HEIGHT")
+        if nw:
+            # handhelds: the picture may be limited by the width instead of the height
+            w(f"#if BUFFER_WIDTH * {nh} <= SFX_CONTENT_H * {nw}")
+            w(f"  #define SFX_ORIG_W {nw}")
+            w(f"  #define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nw} + BUFFER_WIDTH) / (2 * BUFFER_WIDTH))")
+            w("#else")
+            w(f"  #define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
+            w(f"  #define SFX_ORIG_W ((BUFFER_WIDTH * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
+            w("#endif")
+        else:
+            w(f"#define SFX_ORIG_H ((BUFFER_HEIGHT * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
+            w(f"#define SFX_ORIG_W ((BUFFER_WIDTH * {2 * nh} + SFX_CONTENT_H) / (2 * SFX_CONTENT_H))")
     else:
         ps = options.pixel_size or 1.0
         inv = 1.0 / ps

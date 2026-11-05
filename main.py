@@ -46,40 +46,33 @@ LIBRARIES = [
     ("Custom", CUSTOM_DIR),
 ]
 
-# Native resolutions of common systems, with the pixel size used for them. What counts
-# is how many screen lines the emulator uses for the game: 800 when it fills the height
-# of the 16:10 screen, 720 when it shows a 16:9 area with bars at the top and bottom.
-# Pixel size = lines / system lines, rounded to a whole number where it is not exact
-# (x.5 only where exact), because round values keep every scanline equally thick.
+# Source resolutions. TV systems are treated as their CRT raster – 240 lines (240p) or
+# 480 lines (480i/p) – which is what CRT shaders look best with; handhelds use their
+# real screen. The pixel size is not fixed: it follows from the real height of the
+# game picture (720 lines -> 240p = 3x, 480i/p = 1.5x; 800 lines -> 3.33x / 1.67x).
+# w = 0 means "height only".
 SYSTEMS = [
-    {"id": "nes", "label": "NES / Famicom", "w": 256, "h": 240, "px800": 3, "px720": 3},
-    {"id": "snes", "label": "SNES", "w": 256, "h": 224, "px800": 4, "px720": 3},
-    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224, "px800": 4, "px720": 3},
-    {"id": "sms", "label": "Master System", "w": 256, "h": 192, "px800": 4, "px720": 4},
-    {"id": "pce", "label": "PC Engine", "w": 256, "h": 232, "px800": 3, "px720": 3},
-    {"id": "n64", "label": "Nintendo 64", "w": 320, "h": 240, "px800": 3, "px720": 3},
-    {"id": "psx", "label": "PlayStation", "w": 320, "h": 240, "px800": 3, "px720": 3},
-    {"id": "psx480", "label": "PlayStation (480i)", "w": 640, "h": 480, "px800": 1.5, "px720": 1.5},
-    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224, "px800": 4, "px720": 3},
-    {"id": "dc", "label": "Dreamcast", "w": 640, "h": 480, "px800": 1.5, "px720": 1.5},
-    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448, "px800": 2, "px720": 1.5},
-    {"id": "gc", "label": "GameCube / Wii", "w": 640, "h": 480, "px800": 1.5, "px720": 1.5},
-    {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224, "px800": 3, "px720": 3},
-    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144, "px800": 6, "px720": 5},
-    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160, "px800": 5, "px720": 4.5},
-    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192, "px800": 4, "px720": 4},
-    {"id": "psp", "label": "PSP", "w": 480, "h": 272, "px800": 2.5, "px720": 2.5},
-    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144, "px800": 6, "px720": 5},
-    {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152, "px800": 5, "px720": 5},
-    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144, "px800": 6, "px720": 5},
+    {"id": "240p", "label": "240p – NES, SNES, Mega Drive, PS1, N64, Saturn, Arcade", "w": 0, "h": 240},
+    {"id": "480p", "label": "480i/p – PS2, GameCube, Wii, Dreamcast", "w": 0, "h": 480},
+    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144},
+    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160},
+    {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192},
+    {"id": "psp", "label": "PSP", "w": 480, "h": 272},
+    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144},
+    {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152},
+    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144},
 ]
+# System ids of older versions -> new ones
+OLD_SYSTEM_IDS = {"nes": "240p", "snes": "240p", "md": "240p", "sms": "240p", "pce": "240p", "n64": "240p",
+                  "psx": "240p", "saturn": "240p", "arcade": "240p",
+                  "psx480": "480p", "dc": "480p", "ps2": "480p", "gc": "480p"}
 SYSTEM_BY_ID = {s["id"]: s for s in SYSTEMS}
 
 DEFAULT_SETTINGS = {
     "enabled": False,
     "preset": None,          # "<library>/<relative path>"
     "scale_mode": "system",  # "system" | "manual"
-    "system": "snes",
+    "system": "240p",
     "pixel_size": 3.0,
     "game_height": 800,      # 800 = game fills the screen height, 720 = 16:9 area with bars
     "bilinear": True,        # bilinear filtering when the game image is scaled down
@@ -180,6 +173,8 @@ def _migrate(data):
     """Rewrite preset keys saved by older versions (settings, per-preset parameters,
     per-game profiles)."""
     def fix(block):
+        if block.get("system") in OLD_SYSTEM_IDS:
+            block["system"] = OLD_SYSTEM_IDS[block["system"]]
         if "preset" in block:
             block["preset"] = _migrate_key(block["preset"])
         if isinstance(block.get("params"), dict):
@@ -335,9 +330,9 @@ class Plugin:
         params = s.get("params", {}).get(key, {})
         if s.get("scale_mode") == "manual":
             return Options(pixel_size=float(s.get("pixel_size") or 1.0), params=params)
-        sysd = SYSTEM_BY_ID.get(s.get("system"), SYSTEM_BY_ID["snes"])
-        px = sysd["px720"] if int(s.get("game_height") or 800) == 720 else sysd["px800"]
-        return Options(pixel_size=float(px), params=params)
+        sysd = SYSTEM_BY_ID.get(s.get("system"), SYSTEM_BY_ID["240p"])
+        return Options(native=(sysd["w"], sysd["h"]), params=params,
+                       bars=int(s.get("game_height") or 800) == 720)
 
     @staticmethod
     def _defringe():
