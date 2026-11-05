@@ -74,7 +74,8 @@ DEFAULT_SETTINGS = {
     "scale_mode": "system",  # "system" | "manual"
     "system": "240p",
     "pixel_size": 3.0,
-    "game_height": 800,      # 800 = game fills the screen height, 720 = 16:9 area with bars
+    "game_height": 720,      # which pixel sizes the system presets use: 720p or 800p values
+    "values_720_800": True,  # settings already use the 720p / 800p choice (0.7.1)
     "bilinear": True,        # bilinear filtering when the game image is scaled down
     "params": {},            # preset key -> {name: value}
     "only_in_game": True,    # keep the Steam UI untouched
@@ -183,7 +184,21 @@ def _migrate(data):
     for prof in (data.get("profiles") or {}).values():
         if isinstance(prof, dict):
             fix(prof)
+    if not data.get("values_720_800"):
+        # 0.7.1: "Black bars" became a 720p / 800p choice; 720p is the new default
+        data["game_height"] = 720
+        for prof in (data.get("profiles") or {}).values():
+            if isinstance(prof, dict):
+                prof["game_height"] = 720
+        data["values_720_800"] = True
     return data
+
+
+def _preset_pixel_size(sysd, game_height):
+    """Pixel size of a system preset from the 720p or the 800p table (one decimal)."""
+    lines = 800 if int(game_height or 720) == 800 else 720
+    exact = min(1280 / sysd["w"], lines / sysd["h"]) if sysd["w"] else lines / sysd["h"]
+    return slangfx_build.nice_pixel_size(exact)
 
 
 def _write_fx(fx):
@@ -207,24 +222,45 @@ def _is_oled():
 IS_OLED = _is_oled()
 
 
+GAMESCOPE_NAMES = ("gamescope", "gamescope-wl")
+
+
+def _proc_info(pid):
+    """(comm, parent pid) of a process, or None."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+        comm = stat[stat.index("(") + 1:stat.rindex(")")]
+        ppid = int(stat[stat.rindex(")") + 2:].split()[1])
+        return comm, ppid
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def _gamescope_pids():
-    pids = set()
+    """PIDs of the main gamescope process(es): helpers started by gamescope itself
+    come and go and must not count as a crash."""
+    found = {}
     for d in os.listdir("/proc"):
-        if not d.isdigit():
-            continue
-        try:
-            with open(f"/proc/{d}/comm") as f:
-                if f.read().strip() in ("gamescope", "gamescope-wl"):
-                    pids.add(int(d))
-        except OSError:
-            pass
-    return pids
+        if d.isdigit():
+            info = _proc_info(int(d))
+            if info and info[0] in GAMESCOPE_NAMES:
+                found[int(d)] = info[1]
+    return {pid for pid, ppid in found.items() if ppid not in found}
+
+
+def _boot_id():
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def _write_guard(fx, pids, app_id=None):
     os.makedirs(SETTINGS_DIR, exist_ok=True)
     with open(GUARD_FILE, "w") as f:
-        json.dump({"fx": fx, "pids": sorted(pids), "app_id": app_id}, f)
+        json.dump({"fx": fx, "pids": sorted(pids), "app_id": app_id, "boot_id": _boot_id()}, f)
 
 
 def _clear_guard():
@@ -331,8 +367,7 @@ class Plugin:
         if s.get("scale_mode") == "manual":
             return Options(pixel_size=float(s.get("pixel_size") or 1.0), params=params)
         sysd = SYSTEM_BY_ID.get(s.get("system"), SYSTEM_BY_ID["240p"])
-        return Options(native=(sysd["w"], sysd["h"]), params=params,
-                       bars=int(s.get("game_height") or 800) == 720)
+        return Options(pixel_size=_preset_pixel_size(sysd, s.get("game_height")), params=params)
 
     @staticmethod
     def _defringe():
@@ -508,16 +543,22 @@ class Plugin:
                 pass
         await Plugin._load()
         if os.path.exists(GUARD_FILE):
-            logger.error("previous shader did not survive; starting with shader disabled")
             try:
                 with open(GUARD_FILE) as f:
-                    crashed_app = json.load(f).get("app_id")
+                    guard = json.load(f)
             except Exception:
-                crashed_app = None
-            prof = Plugin.settings.get("profiles", {}).get(crashed_app) if crashed_app else None
-            (prof if prof is not None else Plugin.settings)["enabled"] = False
-            Plugin._save()
-            Plugin.last_error = CRASH_MESSAGE
+                guard = {}
+            if guard.get("boot_id") and guard.get("boot_id") == _boot_id():
+                # gamescope went down right after a shader was set, without a reboot
+                logger.error("previous shader did not survive; starting with shader disabled")
+                crashed_app = guard.get("app_id")
+                prof = Plugin.settings.get("profiles", {}).get(crashed_app) if crashed_app else None
+                (prof if prof is not None else Plugin.settings)["enabled"] = False
+                Plugin._save()
+                Plugin.last_error = CRASH_MESSAGE
+            else:
+                # left over from before a restart of the Deck: that is not a crash
+                logger.info("ignoring crash guard from a previous boot")
             _clear_guard()
         # A globally applied shader (also on the Steam UI) starts switched off after a
         # restart, so a too coarse setting can never lock the user out.

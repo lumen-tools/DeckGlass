@@ -334,7 +334,6 @@ function Content() {
     { data: "system", label: "Presets" },
     { data: "manual", label: "Manual" },
   ];
-  const bars = settings?.game_height === 720;
 
 
   if (!settings || !library) {
@@ -479,12 +478,22 @@ function Content() {
         )}
         {settings.scale_mode === "system" && (
           <PanelSectionRow>
-            <ToggleField
-              label="Black bars top & bottom"
-              description="Turn on if you see black bars above and below the game"
-              checked={bars}
-              onChange={(v) => change({ game_height: v ? 720 : 800 })}
+            <Dropdown
+              menuLabel="Pixel size values"
+              rgOptions={[
+                { data: 720, label: "720p" },
+                { data: 800, label: "800p" },
+              ]}
+              selectedOption={settings.game_height === 800 ? 800 : 720}
+              onChange={(o) => change({ game_height: o.data })}
             />
+          </PanelSectionRow>
+        )}
+        {settings.scale_mode === "system" && (
+          <PanelSectionRow>
+            <div style={{ fontSize: "12px", opacity: 0.7 }}>
+              Try both options and see what looks better for each game/shader
+            </div>
           </PanelSectionRow>
         )}
         {settings.scale_mode === "manual" && (
