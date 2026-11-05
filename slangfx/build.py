@@ -180,12 +180,9 @@ def _rewrite_lod_reads(code, sampler, full_chain):
 
 
 def nice_pixel_size(exact):
-    """Nearest of 1, 1.5, 2, 2.5, 3, 4, 5, 6 ... (x.5 above 3 only when exact), ties
-    rounded up: round pixel sizes keep every scanline equally thick."""
-    cands = [1.0, 1.5, 2.0, 2.5] + [float(v) for v in range(3, 13)]
-    if exact >= 3 and abs(exact * 2 - round(exact * 2)) < 1e-6:
-        cands.append(round(exact * 2) / 2)
-    return min(cands, key=lambda c: (abs(c - exact), -c))
+    """Pixel size with at most one decimal (3.33 -> 3.3, 1.67 -> 1.7)."""
+    import math
+    return max(1.0, math.floor(exact * 10 + 0.5) / 10)
 
 
 def _fix_literal_swizzles(code):

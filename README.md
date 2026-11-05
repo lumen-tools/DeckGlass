@@ -13,7 +13,7 @@ gamescope can apply ReShade effects (`.fx`) to the image of the running game. De
 ```
 
 - Multiple passes, aliases, feedback, `OriginalHistory`, LUT textures and parameters are supported.
-- **Source resolution:** the first pass scales the game image down to the source resolution the shader works with. Choose **240p** (NES, SNES, Mega Drive, PS1, N64, Saturn, Arcade), **480i/p** (PS2, GameCube, Wii, Dreamcast) or a handheld. DeckGlass detects whether the emulator renders 720 or 800 lines and always uses a round pixel size for it (240p 3×, 480i/p 1.5×, handhelds e.g. 5× / 6×), because round values keep every scanline equally thick. Turn on **Black bars top & bottom** if you see black bars above and below the game. A manual pixel size is available too.
+- **Source resolution:** the first pass scales the game image down to the source resolution the shader works with. Choose **240p** (NES, SNES, Mega Drive, PS1, N64, Saturn, Arcade), **480i/p** (PS2, GameCube, Wii, Dreamcast) or a handheld. DeckGlass detects whether the emulator renders 720 or 800 lines and uses a pixel size with at most one decimal (240p: 3× / 3.3×, 480i/p: 1.5× / 1.7×). Turn on **Black bars top & bottom** if you see black bars above and below the game. A manual pixel size (steps of 0.1) is available too.
 - **Bilinear filtering** (on by default): smooths the game image while it is scaled down to the source resolution – this usually looks closer to RetroArch. Can be turned off, also per game.
 - Every change writes a new `.fx` that gamescope loads immediately.
 

@@ -170,15 +170,8 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
 
 // ------------------------------------------------------------------ system picker
 
-/** Round pixel size (same rule as the converter) for a game picture of `lines` height. */
-const nicePixelSize = (exact: number) => {
-  const cands = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-  if (exact >= 3 && Math.abs(exact * 2 - Math.round(exact * 2)) < 1e-6) cands.push(Math.round(exact * 2) / 2);
-  return cands.reduce((best, c) => {
-    const d = Math.abs(c - exact), bd = Math.abs(best - exact);
-    return d < bd - 1e-9 || (Math.abs(d - bd) < 1e-9 && c > best) ? c : best;
-  }, cands[0]);
-};
+/** Pixel size with at most one decimal (same rule as the converter). */
+const nicePixelSize = (exact: number) => Math.max(1, Math.floor(exact * 10 + 0.5) / 10);
 const factorFor = (s: System, lines: number) =>
   nicePixelSize(s.w ? Math.min(1280 / s.w, lines / s.h) : lines / s.h);
 const fmt = (f: number) => `${Math.round(f * 100) / 100}×`;
@@ -501,7 +494,7 @@ function Content() {
               description="Screen pixels per original pixel"
               min={1}
               max={8}
-              step={0.05}
+              step={0.1}
               value={settings.pixel_size}
               showValue
               editableValue
