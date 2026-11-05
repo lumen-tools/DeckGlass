@@ -40,31 +40,32 @@ LIBRARIES = [
     ("RetroCrisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
 ]
 
-# Native resolutions of common systems, with the pixel size used for them. The exact
-# fit on the 1280x800 screen is rarely a round number (SNES: 800/224 = 3.57); a round
-# pixel size keeps every scanline equally thick, which looks much calmer than an exact
-# but fractional one. Values are the nearest of 1.5, 2, 2.5, 3, 4, 5, 6.
+# Native resolutions of common systems, with the pixel size used for them.
+# Emulators on the Deck normally show the game in a 1280x720 area (16:9, with bars on
+# the 16:10 screen), so the pixel size is based on 720 lines: 720 / 240 = 3,
+# 720 / 480 = 1.5, 720 / 144 = 5. Where that is not round (SNES: 720 / 224 = 3.21) the
+# nearest whole number is used, because round values keep every scanline equally thick.
 SYSTEMS = [
     {"id": "nes", "label": "NES / Famicom", "w": 256, "h": 240, "px": 3},
-    {"id": "snes", "label": "SNES", "w": 256, "h": 224, "px": 4},
-    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224, "px": 4},
+    {"id": "snes", "label": "SNES", "w": 256, "h": 224, "px": 3},
+    {"id": "md", "label": "Mega Drive / Genesis", "w": 320, "h": 224, "px": 3},
     {"id": "sms", "label": "Master System", "w": 256, "h": 192, "px": 4},
     {"id": "pce", "label": "PC Engine", "w": 256, "h": 232, "px": 3},
     {"id": "n64", "label": "Nintendo 64", "w": 320, "h": 240, "px": 3},
     {"id": "psx", "label": "PlayStation", "w": 320, "h": 240, "px": 3},
     {"id": "psx480", "label": "PlayStation (480i)", "w": 640, "h": 480, "px": 1.5},
-    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224, "px": 4},
+    {"id": "saturn", "label": "Saturn", "w": 320, "h": 224, "px": 3},
     {"id": "dc", "label": "Dreamcast", "w": 640, "h": 480, "px": 1.5},
-    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448, "px": 2},
+    {"id": "ps2", "label": "PlayStation 2", "w": 640, "h": 448, "px": 1.5},
     {"id": "gc", "label": "GameCube / Wii", "w": 640, "h": 480, "px": 1.5},
     {"id": "arcade", "label": "Arcade (CPS)", "w": 384, "h": 224, "px": 3},
-    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144, "px": 6},
-    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160, "px": 5},
+    {"id": "gb", "label": "Game Boy / Color", "w": 160, "h": 144, "px": 5},
+    {"id": "gba", "label": "Game Boy Advance", "w": 240, "h": 160, "px": 4.5},
     {"id": "nds", "label": "Nintendo DS (one screen)", "w": 256, "h": 192, "px": 4},
     {"id": "psp", "label": "PSP", "w": 480, "h": 272, "px": 2.5},
-    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144, "px": 6},
+    {"id": "gg", "label": "Game Gear", "w": 160, "h": 144, "px": 5},
     {"id": "ngp", "label": "Neo Geo Pocket", "w": 160, "h": 152, "px": 5},
-    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144, "px": 6},
+    {"id": "ws", "label": "WonderSwan", "w": 224, "h": 144, "px": 5},
 ]
 SYSTEM_BY_ID = {s["id"]: s for s in SYSTEMS}
 
