@@ -371,28 +371,12 @@ function ParamDialog({
       <div style={titleStyle}>Parameters</div>
       <div style={subtitleStyle}>{title}</div>
       <div style={{ fontSize: "12px", opacity: 0.7, marginBottom: "8px" }}>
-        Changes are applied when you press Apply or close this dialog.
+        Changes are applied when you press Apply or Close.
       </div>
       {error && <div style={{ color: "#ff7070", fontSize: "13px", marginBottom: "8px" }}>{error}</div>}
-      <Focusable style={{ maxHeight: "60vh", overflowY: "auto" }}>
+      <Focusable style={{ maxHeight: "50vh", overflowY: "auto" }}>
         {params === null && <div>Loading …</div>}
         {params !== null && params.length === 0 && <div>This preset has no parameters.</div>}
-        {params !== null && params.length > 0 && (
-          <Focusable style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-            <DialogButton disabled={!dirty} onClick={apply}>
-              Apply
-            </DialogButton>
-            <DialogButton
-              onClick={async () => {
-                setPending({});
-                handle(await withNotice(live, preset, () => resetParams(preset)));
-                setParamsState(await getParams());
-              }}
-            >
-              Reset all to defaults
-            </DialogButton>
-          </Focusable>
-        )}
         {(params ?? []).map((p) =>
           p.kind === "heading" ? (
             <div key={p.name} style={{ marginTop: "12px", fontWeight: "bold", opacity: 0.8 }}>
@@ -413,6 +397,31 @@ function ParamDialog({
             />
           )
         )}
+      </Focusable>
+      {/* fixed bar below the list, so Apply stays visible however long the list is */}
+      <Focusable
+        style={{
+          display: "flex",
+          gap: "8px",
+          marginTop: "10px",
+          paddingTop: "10px",
+          borderTop: "1px solid rgba(255,255,255,0.15)",
+        }}
+      >
+        <DialogButton disabled={!dirty} onClick={apply}>
+          {dirty ? `Apply (${Object.keys(pending).length})` : "Apply"}
+        </DialogButton>
+        <DialogButton
+          disabled={!params || params.length === 0}
+          onClick={async () => {
+            setPending({});
+            handle(await withNotice(live, preset, () => resetParams(preset)));
+            setParamsState(await getParams());
+          }}
+        >
+          Reset all
+        </DialogButton>
+        <DialogButton onClick={close}>Close</DialogButton>
       </Focusable>
     </ModalRoot>
   );
