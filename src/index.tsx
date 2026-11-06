@@ -82,11 +82,14 @@ let lastWarned: string | null = null;
 async function withNotice<T>(live: boolean, preset: string | null, fn: () => Promise<T>): Promise<T> {
   if (live && preset && preset !== lastWarned) {
     lastWarned = preset;
-    toaster.toast({
-      title: "DeckGlass",
-      body: "Applying the shader – the picture may pause for a moment while gamescope compiles it.",
+    const note = toaster.toast({
+      title: "DeckGlass · Compiling shader",
+      body: "The picture may pause briefly.",
       duration: 5000,
+      showNewIndicator: false,
     });
+    // remove it from the Steam notification list once it has served its purpose
+    setTimeout(() => note.dismiss(), 30000);
     await new Promise((r) => setTimeout(r, 400)); // let the notice appear first
   }
   return fn();
