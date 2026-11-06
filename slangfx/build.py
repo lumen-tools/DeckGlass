@@ -557,11 +557,13 @@ def _convert(preset, options, wd):
                     pass_mips[info.index].append(tn)
     chain_steps = {}       # texture name -> [(from_level, to_level)]
     for tn, chain in mip_chains.items():
-        targets = list(range(1, MIP_LEVELS + 1)) if chain["full"] else sorted(l for l in chain["levels"] if l > 0)
+        # a computed LOD needs every level: build the even ones (4x per pass, fewer passes for
+        # gamescope to compile) and interpolate the odd ones
+        targets = list(range(2, MIP_LEVELS + 1, 2)) if chain["full"] else sorted(l for l in chain["levels"] if l > 0)
         steps, cur = [], 0
         for tgt in targets:
             while cur < tgt:
-                nxt = min(tgt, cur + (1 if chain["full"] else 3))
+                nxt = min(tgt, cur + (2 if chain["full"] else 3))
                 steps.append((cur, nxt))
                 cur = nxt
         chain_steps[tn] = steps
@@ -707,10 +709,19 @@ def _convert(preset, options, wd):
                 if need_fn:
                     mip_code.append(f"    float4 {sname}__lvl(float2 uv, float l)")
                     mip_code.append("    {")
-                    mip_code.append(f"        if (l < 0.5) return tex2Dlod({sname}, float4(uv, 0.0, 0.0));")
-                    for lv in range(1, MIP_LEVELS):
-                        mip_code.append(f"        if (l < {lv}.5) return tex2Dlod({sname}__m{lv}, float4(uv, 0.0, 0.0));")
-                    mip_code.append(f"        return tex2Dlod({sname}__m{MIP_LEVELS}, float4(uv, 0.0, 0.0));")
+                    even = [0] + built
+                    def fetch(lv):
+                        return f"tex2Dlod({sname}, float4(uv, 0.0, 0.0))" if lv == 0 else \
+                            f"tex2Dlod({sname}__m{lv}, float4(uv, 0.0, 0.0))"
+                    for lv in range(0, MIP_LEVELS + 1):
+                        if lv in even:
+                            expr = fetch(lv)
+                        else:
+                            lo = max(e for e in even if e < lv)
+                            hi = min((e for e in even if e > lv), default=lo)
+                            expr = f"lerp({fetch(lo)}, {fetch(hi)}, 0.5)"
+                        cond = f"if (l < {lv}.5) " if lv < MIP_LEVELS else ""
+                        mip_code.append(f"        {cond}return {expr};")
                     mip_code.append("    }")
                     mip_code.append(f"    float4 {sname}__lod(float2 uv, float lod)")
                     mip_code.append("    {")

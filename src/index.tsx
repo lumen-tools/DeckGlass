@@ -15,7 +15,7 @@ import {
   showModal,
   staticClasses,
 } from "@decky/ui";
-import { callable, definePlugin } from "@decky/api";
+import { callable, definePlugin, toaster } from "@decky/api";
 import { useEffect, useRef, useState } from "react";
 import { MdMonitor } from "react-icons/md";
 
@@ -64,12 +64,30 @@ const getSystems = callable<[], System[]>("get_systems");
 const getSettings = callable<[], Settings>("get_settings");
 const getParams = callable<[], Param[]>("get_params");
 const updateSettings = callable<[Partial<Settings>], ApplyResult>("update_settings");
-const setParam = callable<[string, string, number], ApplyResult>("set_param");
 const resetParams = callable<[string], ApplyResult>("reset_params");
 const reapply = callable<[], ApplyResult>("reapply");
 const setInGame = callable<[boolean, string | null, string | null], ApplyResult>("set_in_game");
 const setProfile = callable<[boolean], ApplyResult>("set_profile");
 const getCustomDir = callable<[], string>("get_custom_dir");
+const setParams = callable<[string, Record<string, number>], ApplyResult>("set_params");
+
+/** Whether a shader is on screen (gamescope recompiles it on every change). */
+const effectLive = (s: Settings | null) =>
+  !!s && s.enabled && !!s.preset && (s.app_id !== null || !s.only_in_game);
+
+/** Warn before a change that makes gamescope compile the shader: the whole picture,
+ *  this menu included, pauses until it is done. */
+async function withNotice<T>(live: boolean, fn: () => Promise<T>): Promise<T> {
+  if (live) {
+    toaster.toast({
+      title: "DeckGlass",
+      body: "Applying the shader – the picture may pause for a moment while gamescope compiles it.",
+      duration: 5000,
+    });
+    await new Promise((r) => setTimeout(r, 400)); // let the notice appear first
+  }
+  return fn();
+}
 type SaveState = { name: string; preset: string | null };
 const getStates = callable<[], SaveState[]>("get_states");
 const saveState = callable<[string], ApplyResult>("save_state");
@@ -129,7 +147,17 @@ const subtitleStyle = { fontSize: "13px", opacity: 0.7, marginBottom: "10px" };
 
 // ------------------------------------------------------------------ shader browser
 
-function Browser({ root, current, closeModal }: { root: Folder; current: string | null; closeModal?: () => void }) {
+function Browser({
+  root,
+  current,
+  live,
+  closeModal,
+}: {
+  root: Folder;
+  current: string | null;
+  live: boolean;
+  closeModal?: () => void;
+}) {
   const [path, setPath] = useState<string[]>(() => pathOf(root, current));
   const [customDir, setCustomDir] = useState<string>("~/DeckGlass/Custom_Shaders");
   useEffect(() => {
@@ -139,7 +167,7 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
 
   const choose = async (key: string) => {
     closeModal?.();
-    await updateSettings({ preset: key, enabled: true });
+    await withNotice(live, () => updateSettings({ preset: key, enabled: true }));
     notifyChanged();
   };
 
@@ -194,15 +222,17 @@ const systemLabel = (s: System) => {
 function SystemPicker({
   systems,
   current,
+  live,
   closeModal,
 }: {
   systems: System[];
   current: string;
+  live: boolean;
   closeModal?: () => void;
 }) {
   const choose = async (id: string) => {
     closeModal?.();
-    await updateSettings({ scale_mode: "system", system: id });
+    await withNotice(live, () => updateSettings({ scale_mode: "system", system: id }));
     notifyChanged();
   };
   return (
@@ -288,13 +318,25 @@ function SaveDialog({
 
 // ------------------------------------------------------------------ parameter dialog
 
-function ParamDialog({ preset, title, closeModal }: { preset: string; title: string; closeModal?: () => void }) {
-  const [params, setParams] = useState<Param[] | null>(null);
+function ParamDialog({
+  preset,
+  title,
+  live,
+  closeModal,
+}: {
+  preset: string;
+  title: string;
+  live: boolean;
+  closeModal?: () => void;
+}) {
+  const [params, setParamsState] = useState<Param[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // changes are collected and applied together: every apply makes gamescope recompile
+  const [pending, setPending] = useState<Record<string, number>>({});
+  const dirty = Object.keys(pending).length > 0;
 
   useEffect(() => {
-    getParams().then(setParams);
+    getParams().then(setParamsState);
   }, []);
 
   const handle = (r: ApplyResult) => {
@@ -303,29 +345,48 @@ function ParamDialog({ preset, title, closeModal }: { preset: string; title: str
   };
 
   const onChange = (p: Param, v: number) => {
-    setParams((ps) => (ps ?? []).map((x) => (x.name === p.name ? { ...x, value: v } : x)));
-    clearTimeout(timers.current[p.name]);
-    timers.current[p.name] = setTimeout(() => setParam(preset, p.name, v).then(handle), 500);
+    setParamsState((ps) => (ps ?? []).map((x) => (x.name === p.name ? { ...x, value: v } : x)));
+    setPending((pd) => ({ ...pd, [p.name]: v }));
+  };
+
+  const apply = async () => {
+    if (!dirty) return;
+    const values = pending;
+    setPending({});
+    handle(await withNotice(live, () => setParams(preset, values)));
+  };
+
+  const close = async () => {
+    closeModal?.();
+    await apply();
   };
 
   return (
-    <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
+    <ModalRoot onCancel={close} onEscKeypress={close}>
       <div style={titleStyle}>Parameters</div>
       <div style={subtitleStyle}>{title}</div>
+      <div style={{ fontSize: "12px", opacity: 0.7, marginBottom: "8px" }}>
+        Changes are applied when you press Apply or close this dialog.
+      </div>
       {error && <div style={{ color: "#ff7070", fontSize: "13px", marginBottom: "8px" }}>{error}</div>}
       <Focusable style={{ maxHeight: "60vh", overflowY: "auto" }}>
         {params === null && <div>Loading …</div>}
         {params !== null && params.length === 0 && <div>This preset has no parameters.</div>}
         {params !== null && params.length > 0 && (
-          <DialogButton
-            style={{ marginBottom: "8px" }}
-            onClick={async () => {
-              handle(await resetParams(preset));
-              setParams(await getParams());
-            }}
-          >
-            Reset all to defaults
-          </DialogButton>
+          <Focusable style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+            <DialogButton disabled={!dirty} onClick={apply}>
+              Apply
+            </DialogButton>
+            <DialogButton
+              onClick={async () => {
+                setPending({});
+                handle(await withNotice(live, () => resetParams(preset)));
+                setParamsState(await getParams());
+              }}
+            >
+              Reset all to defaults
+            </DialogButton>
+          </Focusable>
         )}
         {(params ?? []).map((p) =>
           p.kind === "heading" ? (
@@ -400,8 +461,11 @@ function Content() {
   }, []);
 
   const change = async (c: Partial<Settings>) => {
-    setSettings((s) => (s ? { ...s, ...c } : s));
-    await run(() => updateSettings(c));
+    const next = settings ? { ...settings, ...c } : null;
+    setSettings(next);
+    // only "Only in games" and OLED defringe change nothing on a running shader's code path
+    const recompiles = effectLive(next) && !("only_in_game" in c && Object.keys(c).length === 1);
+    await run(() => withNotice(recompiles, () => updateSettings(c)));
     await refresh();
   };
 
@@ -475,7 +539,7 @@ function Content() {
               }
               checked={settings.profile_active}
               onChange={async (v) => {
-                await run(() => setProfile(v));
+                await run(() => withNotice(effectLive(settings), () => setProfile(v)));
                 await refresh();
               }}
             />
@@ -497,7 +561,10 @@ function Content() {
               // re-scan so presets copied into the Custom folder show up right away
               const fresh = await getLibrary().catch(() => library);
               setLibrary(fresh);
-              showModal(<Browser root={fresh} current={settings.preset} />);
+              // choosing a preset turns the shader on, so it is on screen in a game or globally
+              showModal(
+                <Browser root={fresh} current={settings.preset} live={!!settings.app_id || !settings.only_in_game} />
+              );
             }}
           >
             Choose Preset …
@@ -507,7 +574,10 @@ function Content() {
           <ButtonItem
             layout="below"
             disabled={!settings.preset}
-            onClick={() => settings.preset && showModal(<ParamDialog preset={settings.preset} title={label} />)}
+            onClick={() =>
+              settings.preset &&
+              showModal(<ParamDialog preset={settings.preset} title={label} live={effectLive(settings)} />)
+            }
           >
             Parameters …
           </ButtonItem>
@@ -523,7 +593,7 @@ function Content() {
             selectedOption={settings.state}
             disabled={!states.length}
             onChange={async (o) => {
-              await run(() => loadState(o.data));
+              await run(() => withNotice(effectLive(settings) || !!settings.app_id || !settings.only_in_game, () => loadState(o.data)));
               await refresh();
             }}
           />
@@ -591,7 +661,7 @@ function Content() {
             onChange={(o) => {
               if (o.data === "system") {
                 // go straight to the list of systems
-                showModal(<SystemPicker systems={systems} current={settings.system} />);
+                showModal(<SystemPicker systems={systems} current={settings.system} live={effectLive(settings)} />);
               } else {
                 change({ scale_mode: o.data });
               }
@@ -602,7 +672,7 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem
               layout="below"
-              onClick={() => showModal(<SystemPicker systems={systems} current={settings.system} />)}
+              onClick={() => showModal(<SystemPicker systems={systems} current={settings.system} live={effectLive(settings)} />)}
             >
               {(() => {
                 const s = systems.find((x) => x.id === settings.system);

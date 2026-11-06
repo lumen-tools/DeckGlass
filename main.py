@@ -542,6 +542,18 @@ class Plugin:
             Plugin._save()
             return await Plugin._apply()
 
+    async def set_params(self, preset, values):
+        """Apply several parameter changes at once (one recompile in gamescope)."""
+        async with Plugin.lock:
+            a = Plugin._active()
+            if preset != a.get("preset"):
+                return {"ok": False, "error": "The shader was changed in the meantime", "params": []}
+            p = a.setdefault("params", {})
+            for name, value in (values or {}).items():
+                p[str(name)] = float(value)
+            Plugin._save()
+            return await Plugin._apply()
+
     async def reset_params(self, preset):
         async with Plugin.lock:
             a = Plugin._active()
