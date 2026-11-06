@@ -185,6 +185,20 @@ def nice_pixel_size(exact):
     return max(1.0, math.floor(exact * 10 + 0.5) / 10)
 
 
+SAFE_POW = """// pow() with a base that never reaches 0: shaders such as crt-geom-deluxe compute
+// pow(0, -x) when data from the previous frame is missing (gamescope discards it for
+// large textures on the Deck), which turns the whole picture black.
+float sfx_pow(float a, float b) { return pow(max(a, 1e-10), b); }
+float2 sfx_pow(float2 a, float2 b) { return pow(max(a, (1e-10).xx), b); }
+float3 sfx_pow(float3 a, float3 b) { return pow(max(a, (1e-10).xxx), b); }
+float4 sfx_pow(float4 a, float4 b) { return pow(max(a, (1e-10).xxxx), b); }
+"""
+
+
+def _safe_pow(code):
+    return re.sub(r"(?<![\w.])pow\(", "sfx_pow(", code)
+
+
 def _fix_literal_swizzles(code):
     return re.sub(r"(?<![\w.])(\d+\.\d*(?:[eE][+-]?\d+)?f?|\d+u?)\.([xyzw]{1,4}|[rgba]{1,4})\b", r"(\1).\2", code)
 
@@ -455,6 +469,7 @@ def _convert(preset, options, wd):
     out.extend(lines_size)
     w("")
     w('uniform int SFX_FRAMECOUNT < source = "framecount"; >;')
+    out.extend(SAFE_POW.splitlines())
     w("")
     for name in param_order:
         w(f"static const float PRM_{name} = {_fmt_float(param_values[name])};")
@@ -691,8 +706,9 @@ def _convert(preset, options, wd):
         for stage, ns in ((info.vs, f"P{k}_V"), (info.fs, f"P{k}_F")):
             body = stage.body
             body = _clamp_param_indices(replace_identifiers(body, uniform_map(stage)))
+            body = _safe_pow(body)
             body = _fix_literal_swizzles(rename_reserved(body))
-            main = _fix_literal_swizzles(rename_reserved(stage.main_body))
+            main = _safe_pow(_fix_literal_swizzles(rename_reserved(stage.main_body)))
             mip_code = []
             for t in stage.textures:
                 ref = info.tex_refs[t]
