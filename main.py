@@ -46,7 +46,7 @@ OLD_CUSTOM_DIRS = [os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders"),    
                    os.path.join(decky.DECKY_USER_HOME, "DeckGlass", "Custom Shaders")]  # 0.8.1
 LIBRARIES = [
     ("RetroArch", BUNDLED_SLANG),
-    ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
+    ("Retro_Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
     (CUSTOM_NAME, CUSTOM_DIR),
 ]
 
@@ -168,8 +168,8 @@ def _build_library():
 
 
 # Library names that changed between versions: old preset-key prefix -> new one.
-RENAMED_LIBRARIES = {"RetroCrisis/": "Retro Crisis/", "Custom/": "Custom_Shaders/",
-                     "Custom Shaders/": "Custom_Shaders/"}
+RENAMED_LIBRARIES = {"RetroCrisis/": "Retro_Crisis/", "Retro Crisis/": "Retro_Crisis/",
+                     "Custom/": "Custom_Shaders/", "Custom Shaders/": "Custom_Shaders/"}
 
 
 def _migrate_key(key):
