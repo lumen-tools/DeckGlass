@@ -39,11 +39,13 @@ CRASH_MESSAGE = ("gamescope crashed with this shader, so it was turned off. "
 BUNDLED_SLANG = os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")
 # Own presets: copy them (with their folders) here. References to RetroArch's shader
 # folder ("shaders_slang/...") are found in the bundled libretro shaders.
-CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")
+CUSTOM_NAME = "Custom Shaders"
+CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "DeckGlass", CUSTOM_NAME)
+OLD_CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")  # before 0.8.1
 LIBRARIES = [
     ("RetroArch", BUNDLED_SLANG),
     ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
-    ("Custom", CUSTOM_DIR),
+    (CUSTOM_NAME, CUSTOM_DIR),
 ]
 
 # Source resolutions. TV systems are treated as their CRT raster – 240 lines (240p) or
@@ -164,7 +166,7 @@ def _build_library():
 
 
 # Library names that changed between versions: old preset-key prefix -> new one.
-RENAMED_LIBRARIES = {"RetroCrisis/": "Retro Crisis/"}
+RENAMED_LIBRARIES = {"RetroCrisis/": "Retro Crisis/", "Custom/": "Custom Shaders/"}
 
 
 def _migrate_key(key):
@@ -186,6 +188,9 @@ def _migrate(data):
         if isinstance(block.get("params"), dict):
             block["params"] = {_migrate_key(k): v for k, v in block["params"].items()}
     fix(data)
+    for st in (data.get("states") or {}).values():
+        if isinstance(st, dict):
+            fix(st)
     for prof in (data.get("profiles") or {}).values():
         if isinstance(prof, dict):
             fix(prof)
@@ -209,6 +214,26 @@ def _migrate(data):
                 prof["game_height"] = 720
         data["values_720_800"] = True
     return data
+
+
+def _move_old_custom_dir():
+    """0.8.1 moved ~/deckglass-shaders to ~/DeckGlass/Custom Shaders."""
+    if not os.path.isdir(OLD_CUSTOM_DIR):
+        return
+    for entry in os.listdir(OLD_CUSTOM_DIR):
+        src = os.path.join(OLD_CUSTOM_DIR, entry)
+        dst = os.path.join(CUSTOM_DIR, entry)
+        if os.path.exists(dst):
+            logger.warning(f"not moving {src}: {dst} already exists")
+            continue
+        try:
+            shutil.move(src, dst)
+        except OSError:
+            logger.exception(f"could not move {src}")
+    try:
+        os.rmdir(OLD_CUSTOM_DIR)  # only succeeds when it is empty now
+    except OSError:
+        pass
 
 
 def _preset_pixel_size(sysd, game_height):
@@ -601,6 +626,7 @@ class Plugin:
         slangfx_preset.FALLBACK_ROOTS[:] = [BUNDLED_SLANG]
         try:
             os.makedirs(CUSTOM_DIR, exist_ok=True)
+            _move_old_custom_dir()
         except OSError:
             logger.exception("could not create custom shader folder")
         for tool in ("glslang", "spirv-cross"):

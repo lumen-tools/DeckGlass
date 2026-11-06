@@ -131,7 +131,7 @@ const subtitleStyle = { fontSize: "13px", opacity: 0.7, marginBottom: "10px" };
 
 function Browser({ root, current, closeModal }: { root: Folder; current: string | null; closeModal?: () => void }) {
   const [path, setPath] = useState<string[]>(() => pathOf(root, current));
-  const [customDir, setCustomDir] = useState<string>("~/deckglass-shaders");
+  const [customDir, setCustomDir] = useState<string>("~/DeckGlass/Custom Shaders");
   useEffect(() => {
     getCustomDir().then(setCustomDir).catch(() => {});
   }, []);
@@ -166,7 +166,7 @@ function Browser({ root, current, closeModal }: { root: Folder; current: string 
         ))}
         {folder.folders.length === 0 && folder.presets.length === 0 && (
           <div style={{ opacity: 0.7, padding: "8px", wordBreak: "break-word" }}>
-            {path.length === 1 && path[0] === "Custom"
+            {path.length === 1 && path[0] === "Custom Shaders"
               ? `No presets yet. Copy slang presets (.slangp) with their folders to ${customDir} – for example an unpacked Retro Crisis release. Then reopen this dialog.`
               : "This folder is empty."}
           </div>
