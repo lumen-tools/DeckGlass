@@ -16,7 +16,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { MdMonitor } from "react-icons/md";
 
 // ------------------------------------------------------------------ types & backend
@@ -76,9 +76,12 @@ const effectLive = (s: Settings | null) =>
   !!s && s.enabled && !!s.preset && (s.app_id !== null || !s.only_in_game);
 
 /** Warn before a change that makes gamescope compile the shader: the whole picture,
- *  this menu included, pauses until it is done. */
-async function withNotice<T>(live: boolean, fn: () => Promise<T>): Promise<T> {
-  if (live) {
+ *  this menu included, pauses until it is done. Shown once per shader – again after
+ *  another shader was chosen. */
+let lastWarned: string | null = null;
+async function withNotice<T>(live: boolean, preset: string | null, fn: () => Promise<T>): Promise<T> {
+  if (live && preset && preset !== lastWarned) {
+    lastWarned = preset;
     toaster.toast({
       title: "DeckGlass",
       body: "Applying the shader – the picture may pause for a moment while gamescope compiles it.",
@@ -167,7 +170,7 @@ function Browser({
 
   const choose = async (key: string) => {
     closeModal?.();
-    await withNotice(live, () => updateSettings({ preset: key, enabled: true }));
+    await withNotice(live, key, () => updateSettings({ preset: key, enabled: true }));
     notifyChanged();
   };
 
@@ -223,16 +226,18 @@ function SystemPicker({
   systems,
   current,
   live,
+  preset,
   closeModal,
 }: {
   systems: System[];
   current: string;
   live: boolean;
+  preset: string | null;
   closeModal?: () => void;
 }) {
   const choose = async (id: string) => {
     closeModal?.();
-    await withNotice(live, () => updateSettings({ scale_mode: "system", system: id }));
+    await withNotice(live, preset, () => updateSettings({ scale_mode: "system", system: id }));
     notifyChanged();
   };
   return (
@@ -353,7 +358,7 @@ function ParamDialog({
     if (!dirty) return;
     const values = pending;
     setPending({});
-    handle(await withNotice(live, () => setParams(preset, values)));
+    handle(await withNotice(live, preset, () => setParams(preset, values)));
   };
 
   const close = async () => {
@@ -380,7 +385,7 @@ function ParamDialog({
             <DialogButton
               onClick={async () => {
                 setPending({});
-                handle(await withNotice(live, () => resetParams(preset)));
+                handle(await withNotice(live, preset, () => resetParams(preset)));
                 setParamsState(await getParams());
               }}
             >
@@ -422,7 +427,7 @@ function Content() {
   const [states, setStates] = useState<SaveState[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pxTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [px, setPx] = useState<number | null>(null); // manual pixel size being edited
 
   const run = async (fn: () => Promise<ApplyResult>) => {
     setBusy(true);
@@ -465,7 +470,7 @@ function Content() {
     setSettings(next);
     // only "Only in games" and OLED defringe change nothing on a running shader's code path
     const recompiles = effectLive(next) && !("only_in_game" in c && Object.keys(c).length === 1);
-    await run(() => withNotice(recompiles, () => updateSettings(c)));
+    await run(() => withNotice(recompiles, next?.preset ?? null, () => updateSettings(c)));
     await refresh();
   };
 
@@ -539,7 +544,7 @@ function Content() {
               }
               checked={settings.profile_active}
               onChange={async (v) => {
-                await run(() => withNotice(effectLive(settings), () => setProfile(v)));
+                await run(() => withNotice(effectLive(settings), settings.preset, () => setProfile(v)));
                 await refresh();
               }}
             />
@@ -593,7 +598,10 @@ function Content() {
             selectedOption={settings.state}
             disabled={!states.length}
             onChange={async (o) => {
-              await run(() => withNotice(effectLive(settings) || !!settings.app_id || !settings.only_in_game, () => loadState(o.data)));
+              const target = states.find((s) => s.name === o.data)?.preset ?? null;
+              await run(() =>
+                withNotice(!!settings.app_id || !settings.only_in_game, target, () => loadState(o.data))
+              );
               await refresh();
             }}
           />
@@ -661,7 +669,7 @@ function Content() {
             onChange={(o) => {
               if (o.data === "system") {
                 // go straight to the list of systems
-                showModal(<SystemPicker systems={systems} current={settings.system} live={effectLive(settings)} />);
+                showModal(<SystemPicker systems={systems} current={settings.system} live={effectLive(settings)} preset={settings.preset} />);
               } else {
                 change({ scale_mode: o.data });
               }
@@ -672,7 +680,7 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem
               layout="below"
-              onClick={() => showModal(<SystemPicker systems={systems} current={settings.system} live={effectLive(settings)} />)}
+              onClick={() => showModal(<SystemPicker systems={systems} current={settings.system} live={effectLive(settings)} preset={settings.preset} />)}
             >
               {(() => {
                 const s = systems.find((x) => x.id === settings.system);
@@ -702,6 +710,7 @@ function Content() {
           </PanelSectionRow>
         )}
         {settings.scale_mode === "manual" && (
+          <>
           <PanelSectionRow>
             <SliderField
               label="Pixel size"
@@ -709,16 +718,27 @@ function Content() {
               min={1}
               max={8}
               step={0.01}
-              value={settings.pixel_size}
+              value={px ?? settings.pixel_size}
               showValue
               editableValue
-              onChange={(v) => {
-                setSettings((s) => (s ? { ...s, pixel_size: v } : s));
-                clearTimeout(pxTimer.current);
-                pxTimer.current = setTimeout(() => change({ pixel_size: v }), 500);
-              }}
+              onChange={(v) => setPx(v)}
             />
           </PanelSectionRow>
+          {px !== null && Math.abs(px - settings.pixel_size) > 1e-6 && (
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                onClick={async () => {
+                  const v = px;
+                  setPx(null);
+                  await change({ pixel_size: v });
+                }}
+              >
+                Apply pixel size {Math.round(px * 100) / 100}×
+              </ButtonItem>
+            </PanelSectionRow>
+          )}
+          </>
         )}
       </PanelSection>
     </>
