@@ -1,5 +1,6 @@
 import {
   ButtonItem,
+  ConfirmModal,
   DialogButton,
   Dropdown,
   DropdownOption,
@@ -9,6 +10,7 @@ import {
   PanelSectionRow,
   Router,
   SliderField,
+  TextField,
   ToggleField,
   showModal,
   staticClasses,
@@ -47,6 +49,7 @@ type Settings = {
   game_height: number;
   bilinear: boolean;
   only_in_game: boolean;
+  state: string | null;
   is_oled: boolean;
   oled_defringe: boolean;
   last_error: string | null;
@@ -67,6 +70,11 @@ const reapply = callable<[], ApplyResult>("reapply");
 const setInGame = callable<[boolean, string | null, string | null], ApplyResult>("set_in_game");
 const setProfile = callable<[boolean], ApplyResult>("set_profile");
 const getCustomDir = callable<[], string>("get_custom_dir");
+type SaveState = { name: string; preset: string | null };
+const getStates = callable<[], SaveState[]>("get_states");
+const saveState = callable<[string], ApplyResult>("save_state");
+const loadState = callable<[string], ApplyResult>("load_state");
+const deleteState = callable<[string], ApplyResult>("delete_state");
 
 // The side panel listens here so dialogs can tell it to refresh.
 const listeners = new Set<() => void>();
@@ -213,6 +221,71 @@ function SystemPicker({
   );
 }
 
+// ------------------------------------------------------------------ save states
+
+const slug = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+/** e.g. "retro-crisis-ps2-dirty-1.5x" */
+function suggestName(settings: Settings, label: string, systems: System[]): string {
+  const lib = settings.preset ? settings.preset.split("/")[0] : "";
+  let px: number | null = null;
+  if (settings.scale_mode === "manual") px = settings.pixel_size;
+  else {
+    const s = systems.find((x) => x.id === settings.system);
+    if (s) px = factorFor(s, settings.game_height === 800 ? 800 : 720);
+  }
+  const parts = [slug(lib), slug(label)];
+  if (px) parts.push(`${Math.round(px * 100) / 100}x`);
+  return parts.filter(Boolean).join("-");
+}
+
+function SaveDialog({
+  initial,
+  existing,
+  closeModal,
+}: {
+  initial: string;
+  existing: string[];
+  closeModal?: () => void;
+}) {
+  const [name, setName] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = name.trim();
+  const replaces = existing.some((n) => n === trimmed);
+  const save = async () => {
+    const r = await saveState(trimmed);
+    if (!r.ok) {
+      setError(r.error ?? "Could not save");
+      return;
+    }
+    closeModal?.();
+    notifyChanged();
+  };
+  return (
+    <ModalRoot onCancel={closeModal} onEscKeypress={closeModal}>
+      <div style={titleStyle}>Save State</div>
+      <div style={subtitleStyle}>Stores the shader, source resolution and all parameters under a name.</div>
+      <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      {replaces && (
+        <div style={{ fontSize: "13px", opacity: 0.8, marginTop: "6px" }}>
+          A save state with this name exists and will be replaced.
+        </div>
+      )}
+      {error && <div style={{ color: "#ff7070", fontSize: "13px", marginTop: "6px" }}>{error}</div>}
+      <Focusable style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+        <DialogButton disabled={!trimmed} onClick={save}>
+          {replaces ? "Replace" : "Save"}
+        </DialogButton>
+        <DialogButton onClick={() => closeModal?.()}>Cancel</DialogButton>
+      </Focusable>
+    </ModalRoot>
+  );
+}
+
 // ------------------------------------------------------------------ parameter dialog
 
 function ParamDialog({ preset, title, closeModal }: { preset: string; title: string; closeModal?: () => void }) {
@@ -285,6 +358,7 @@ function Content() {
   const [library, setLibrary] = useState<Folder | null>(null);
   const [systems, setSystems] = useState<System[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [states, setStates] = useState<SaveState[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pxTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -302,8 +376,9 @@ function Content() {
   };
 
   const refresh = async () => {
-    const st = await getSettings();
+    const [st, sv] = await Promise.all([getSettings(), getStates()]);
     setSettings(st);
+    setStates(sv);
     setError(st.last_error);
   };
 
@@ -436,6 +511,66 @@ function Content() {
           >
             Parameters …
           </ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
+
+      <PanelSection title="Save States">
+        <PanelSectionRow>
+          <Dropdown
+            menuLabel="Save state"
+            strDefaultLabel={states.length ? "Not saved" : "No save states yet"}
+            rgOptions={states.map((s) => ({ data: s.name, label: s.name }))}
+            selectedOption={settings.state}
+            disabled={!states.length}
+            onChange={async (o) => {
+              await run(() => loadState(o.data));
+              await refresh();
+            }}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            disabled={!settings.preset}
+            onClick={() =>
+              showModal(
+                <SaveDialog
+                  initial={settings.state ?? suggestName(settings, label, systems)}
+                  existing={states.map((s) => s.name)}
+                />
+              )
+            }
+          >
+            Save as …
+          </ButtonItem>
+        </PanelSectionRow>
+        {settings.state && (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={() => {
+                const name = settings.state!;
+                showModal(
+                  <ConfirmModal
+                    strTitle="Delete save state"
+                    strDescription={`Delete "${name}"? The current settings stay as they are.`}
+                    strOKButtonText="Delete"
+                    onOK={async () => {
+                      await run(() => deleteState(name));
+                      await refresh();
+                    }}
+                  />
+                );
+              }}
+            >
+              Delete "{settings.state}"
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
+        <PanelSectionRow>
+          <div style={{ fontSize: "12px", opacity: 0.7 }}>
+            Parameters reset when you choose another shader or save state. Save a state to keep them.
+          </div>
         </PanelSectionRow>
       </PanelSection>
 

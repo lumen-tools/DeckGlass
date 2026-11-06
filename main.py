@@ -77,13 +77,18 @@ DEFAULT_SETTINGS = {
     "game_height": 720,      # which pixel sizes the system presets use: 720p or 800p values
     "values_720_800": True,  # settings already use the 720p / 800p choice (0.7.1)
     "bilinear": True,        # bilinear filtering when the game image is scaled down
-    "params": {},            # preset key -> {name: value}
+    "params": {},            # parameter values of the current preset: {name: value}
+    "state": None,           # name of the loaded save state, if any
+    "states": {},            # save states: name -> snapshot of preset, source resolution and parameters
     "only_in_game": True,    # keep the Steam UI untouched
     "oled_defringe": False,  # Deck OLED only: reduce colour fringing (device setting, not per game)
     "profiles": {},          # Steam app id -> per-game copy of PROFILE_KEYS (+ "name")
 }
 # Settings that a per-game profile overrides. "only_in_game" stays global.
-PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "bilinear", "params")
+PROFILE_KEYS = ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "bilinear", "params",
+                "state")
+# What a save state stores.
+STATE_KEYS = ("preset", "scale_mode", "system", "pixel_size", "game_height", "bilinear", "params")
 
 
 def _xprop_set(value):
@@ -184,6 +189,18 @@ def _migrate(data):
     for prof in (data.get("profiles") or {}).values():
         if isinstance(prof, dict):
             fix(prof)
+    # 0.8: parameters belong to the current preset only (older versions kept them per
+    # preset): keep the values of the current preset, drop the rest.
+    def flatten(block):
+        params = block.get("params")
+        if isinstance(params, dict) and any(isinstance(v, dict) for v in params.values()):
+            current = params.get(block.get("preset"))
+            block["params"] = dict(current) if isinstance(current, dict) else {}
+    flatten(data)
+    for prof in (data.get("profiles") or {}).values():
+        if isinstance(prof, dict):
+            flatten(prof)
+
     if not data.get("values_720_800"):
         # 0.7.1: "Black bars" became a 720p / 800p choice; 720p is the new default
         data["game_height"] = 720
@@ -336,8 +353,7 @@ class Plugin:
         if not path:
             return []
         try:
-            return await asyncio.to_thread(slangfx_build.list_parameters, path,
-                                           a.get("params", {}).get(a["preset"], {}))
+            return await asyncio.to_thread(slangfx_build.list_parameters, path, a.get("params") or {})
         except Exception:
             logger.exception("list parameters")
             return []
@@ -350,6 +366,7 @@ class Plugin:
         res = {k: a.get(k, DEFAULT_SETTINGS[k]) for k in PROFILE_KEYS if k != "params"}
         res.update({
             "only_in_game": Plugin.settings.get("only_in_game", True),
+            "state": a.get("state"),
             "is_oled": IS_OLED,
             "oled_defringe": bool(Plugin.settings.get("oled_defringe")),
             "last_error": Plugin.last_error,
@@ -363,7 +380,7 @@ class Plugin:
     @staticmethod
     def _options(key):
         s = Plugin._active()
-        params = s.get("params", {}).get(key, {})
+        params = s.get("params") or {}
         if s.get("scale_mode") == "manual":
             return Options(pixel_size=float(s.get("pixel_size") or 1.0), params=params)
         sysd = SYSTEM_BY_ID.get(s.get("system"), SYSTEM_BY_ID["240p"])
@@ -423,8 +440,7 @@ class Plugin:
             path = Plugin._resolve_preset(s.get("preset"))
             if path:
                 try:
-                    plist = await asyncio.to_thread(slangfx_build.list_parameters, path,
-                                                    s.get("params", {}).get(s["preset"], {}))
+                    plist = await asyncio.to_thread(slangfx_build.list_parameters, path, s.get("params") or {})
                 except Exception:
                     logger.exception("list parameters")
             return {"ok": True, "params": plist, "warning": Plugin.last_error}
@@ -474,6 +490,10 @@ class Plugin:
             if changes.get("enabled") or "preset" in changes:
                 Plugin.last_error = None
             target = Plugin._active()
+            if "preset" in changes and changes["preset"] != target.get("preset"):
+                # another shader: parameters start from its defaults, no save state loaded
+                target["params"] = {}
+                target["state"] = None
             for k in ("enabled", "preset", "scale_mode", "system", "pixel_size", "game_height", "bilinear"):
                 if k in changes:
                     target[k] = changes[k]
@@ -486,13 +506,61 @@ class Plugin:
 
     async def set_param(self, preset, name, value):
         async with Plugin.lock:
-            Plugin._active().setdefault("params", {}).setdefault(preset, {})[name] = float(value)
+            a = Plugin._active()
+            if preset != a.get("preset"):
+                return {"ok": False, "error": "The shader was changed in the meantime", "params": []}
+            a.setdefault("params", {})[name] = float(value)
             Plugin._save()
             return await Plugin._apply()
 
     async def reset_params(self, preset):
         async with Plugin.lock:
-            Plugin._active().setdefault("params", {}).pop(preset, None)
+            a = Plugin._active()
+            if preset == a.get("preset"):
+                a["params"] = {}
+            Plugin._save()
+            return await Plugin._apply()
+
+    # ------------------------------------------------------------------ save states
+    async def get_states(self):
+        states = Plugin.settings.get("states") or {}
+        return [{"name": n, "preset": st.get("preset")} for n, st in sorted(states.items(), key=lambda x: x[0].lower())]
+
+    async def save_state(self, name):
+        name = " ".join(str(name or "").split())[:64]
+        if not name:
+            return {"ok": False, "error": "Please enter a name", "params": []}
+        async with Plugin.lock:
+            a = Plugin._active()
+            if not a.get("preset"):
+                return {"ok": False, "error": "Choose a preset first", "params": []}
+            Plugin.settings.setdefault("states", {})[name] = {k: copy.deepcopy(a.get(k, DEFAULT_SETTINGS[k]))
+                                                             for k in STATE_KEYS}
+            a["state"] = name
+            Plugin._save()
+            return await Plugin._apply()
+
+    async def load_state(self, name):
+        async with Plugin.lock:
+            st = (Plugin.settings.get("states") or {}).get(name)
+            if not st:
+                return {"ok": False, "error": "Save state not found", "params": []}
+            a = Plugin._active()
+            for k in STATE_KEYS:
+                if k in st:
+                    a[k] = copy.deepcopy(st[k])
+            a["state"] = name
+            a["enabled"] = True
+            Plugin.last_error = None
+            Plugin._save()
+            return await Plugin._apply()
+
+    async def delete_state(self, name):
+        async with Plugin.lock:
+            (Plugin.settings.get("states") or {}).pop(name, None)
+            for block in [Plugin.settings] + list((Plugin.settings.get("profiles") or {}).values()):
+                if block.get("state") == name:
+                    block["state"] = None
             Plugin._save()
             return await Plugin._apply()
 
