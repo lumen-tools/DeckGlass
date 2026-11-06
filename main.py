@@ -39,9 +39,11 @@ CRASH_MESSAGE = ("gamescope crashed with this shader, so it was turned off. "
 BUNDLED_SLANG = os.path.join(PLUGIN_DIR, "shaders", "shaders_slang")
 # Own presets: copy them (with their folders) here. References to RetroArch's shader
 # folder ("shaders_slang/...") are found in the bundled libretro shaders.
-CUSTOM_NAME = "Custom Shaders"
+CUSTOM_NAME = "Custom_Shaders"
 CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "DeckGlass", CUSTOM_NAME)
-OLD_CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders")  # before 0.8.1
+# earlier locations, moved into CUSTOM_DIR on start
+OLD_CUSTOM_DIRS = [os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders"),           # before 0.8.1
+                   os.path.join(decky.DECKY_USER_HOME, "DeckGlass", "Custom Shaders")]  # 0.8.1
 LIBRARIES = [
     ("RetroArch", BUNDLED_SLANG),
     ("Retro Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
@@ -166,7 +168,8 @@ def _build_library():
 
 
 # Library names that changed between versions: old preset-key prefix -> new one.
-RENAMED_LIBRARIES = {"RetroCrisis/": "Retro Crisis/", "Custom/": "Custom Shaders/"}
+RENAMED_LIBRARIES = {"RetroCrisis/": "Retro Crisis/", "Custom/": "Custom_Shaders/",
+                     "Custom Shaders/": "Custom_Shaders/"}
 
 
 def _migrate_key(key):
@@ -217,23 +220,24 @@ def _migrate(data):
 
 
 def _move_old_custom_dir():
-    """0.8.1 moved ~/deckglass-shaders to ~/DeckGlass/Custom Shaders."""
-    if not os.path.isdir(OLD_CUSTOM_DIR):
-        return
-    for entry in os.listdir(OLD_CUSTOM_DIR):
-        src = os.path.join(OLD_CUSTOM_DIR, entry)
-        dst = os.path.join(CUSTOM_DIR, entry)
-        if os.path.exists(dst):
-            logger.warning(f"not moving {src}: {dst} already exists")
+    """Move presets from earlier custom folders into CUSTOM_DIR."""
+    for old in OLD_CUSTOM_DIRS:
+        if not os.path.isdir(old):
             continue
+        for entry in os.listdir(old):
+            src = os.path.join(old, entry)
+            dst = os.path.join(CUSTOM_DIR, entry)
+            if os.path.exists(dst):
+                logger.warning(f"not moving {src}: {dst} already exists")
+                continue
+            try:
+                shutil.move(src, dst)
+            except OSError:
+                logger.exception(f"could not move {src}")
         try:
-            shutil.move(src, dst)
+            os.rmdir(old)  # only succeeds when it is empty now
         except OSError:
-            logger.exception(f"could not move {src}")
-    try:
-        os.rmdir(OLD_CUSTOM_DIR)  # only succeeds when it is empty now
-    except OSError:
-        pass
+            pass
 
 
 def _preset_pixel_size(sysd, game_height):
