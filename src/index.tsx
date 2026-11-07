@@ -501,6 +501,11 @@ function Content() {
           />
         </PanelSectionRow>
         <PanelSectionRow>
+          <div style={{ fontSize: "11px", opacity: 0.6 }}>
+            Turning the shader on/off or changing settings/parameters can freeze the system for a while.
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
           <ToggleField
             label="Only in games"
             description="Keep the Steam menus unshaded"
@@ -585,11 +590,7 @@ function Content() {
             Parameters …
           </ButtonItem>
         </PanelSectionRow>
-        <PanelSectionRow>
-          <div style={{ fontSize: "11px", opacity: 0.6 }}>
-            Changing the shader in a game can pause the picture for a moment while gamescope compiles it.
-          </div>
-        </PanelSectionRow>
+
       </PanelSection>
 
       <PanelSection title="Save States">
