@@ -36,7 +36,7 @@ Presets are picked in a file browser, like in RetroArch, with three top folders 
 
 ## Limitations
 
-- Whenever the active shader changes in a game (turned on, another preset, new parameters …), gamescope compiles it and the whole picture pauses until it is done – a moment for small shaders, longer for big ones like Retro Crisis. DeckGlass shows a notice the first time this happens for a shader. Best set the shader up before starting the game.
+- Whenever the active shader changes in a game (turned on, another preset, new parameters …), gamescope compiles it and the whole picture pauses until it is done – a moment for small shaders, longer for big ones like Retro Crisis. The plugin shows a short hint about this under Parameters. Best set the shader up before starting the game.
 - CRT masks (aperture grille, slot mask) are designed for RGB-stripe LCDs and can look tinted on the Deck OLED, just like in RetroArch. Pick a different mask type in the preset parameters if that happens.
 - Screenshots do not include the shader.
 - Heavy presets (e.g. crt-royale) cost a lot of GPU time.

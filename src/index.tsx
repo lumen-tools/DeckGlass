@@ -15,7 +15,7 @@ import {
   showModal,
   staticClasses,
 } from "@decky/ui";
-import { callable, definePlugin, toaster } from "@decky/api";
+import { callable, definePlugin } from "@decky/api";
 import { useEffect, useState } from "react";
 import { MdMonitor } from "react-icons/md";
 
@@ -75,23 +75,9 @@ const setParams = callable<[string, Record<string, number>], ApplyResult>("set_p
 const effectLive = (s: Settings | null) =>
   !!s && s.enabled && !!s.preset && (s.app_id !== null || !s.only_in_game);
 
-/** Warn before a change that makes gamescope compile the shader: the whole picture,
- *  this menu included, pauses until it is done. Shown once per shader – again after
- *  another shader was chosen. */
-let lastWarned: string | null = null;
-async function withNotice<T>(live: boolean, preset: string | null, fn: () => Promise<T>): Promise<T> {
-  if (live && preset && preset !== lastWarned) {
-    lastWarned = preset;
-    const note = toaster.toast({
-      title: "DeckGlass · Compiling shader",
-      body: "The picture may pause briefly.",
-      duration: 5000,
-      showNewIndicator: false,
-    });
-    // remove it from the Steam notification list once it has served its purpose
-    setTimeout(() => note.dismiss(), 30000);
-    await new Promise((r) => setTimeout(r, 400)); // let the notice appear first
-  }
+/** Applies a change. (Earlier versions showed a notice here; the panel now explains
+ *  the compile pause with a fixed hint instead.) */
+async function withNotice<T>(_live: boolean, _preset: string | null, fn: () => Promise<T>): Promise<T> {
   return fn();
 }
 type SaveState = { name: string; preset: string | null };
@@ -598,6 +584,11 @@ function Content() {
           >
             Parameters …
           </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ fontSize: "11px", opacity: 0.6 }}>
+            Changing the shader in a game can pause the picture for a moment while gamescope compiles it.
+          </div>
         </PanelSectionRow>
       </PanelSection>
 
