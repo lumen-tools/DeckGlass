@@ -509,7 +509,21 @@ def _convert(preset, options, wd):
     w("}")
     w("float4 SFX_PS_Down(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target")
     w("{")
-    w("    return float4(tex2D(S_BACK, uv).rgb, 1.0);")
+    if options.bilinear:
+        # Average the whole screen area that one source pixel covers. On a picture the
+        # emulator scaled up without filtering this equals "bilinear in the emulator +
+        # point sampling" (box * box = tent): misaligned samples blend smoothly instead
+        # of jumping to a neighbouring pixel, which removes the mosaic pattern.
+        w("    float2 fp = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / float2(SFX_ORIG_W, SFX_ORIG_H);")
+        w("    int n = clamp(int(ceil(max(fp.x, fp.y))), 2, 8);")
+        w("    float2 stp = fp / float(n) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT);")
+        w("    float3 acc = 0.0;")
+        w("    [loop] for (int j = 0; j < n; j++)")
+        w("    [loop] for (int i = 0; i < n; i++)")
+        w("        acc += tex2D(S_BACK, uv + (float2(i, j) + 0.5 - float(n) * 0.5) * stp).rgb;")
+        w("    return float4(acc / float(n * n), 1.0);")
+    else:
+        w("    return float4(tex2D(S_BACK, uv).rgb, 1.0);")
     w("}")
 
     copies = []  # (dst_tex, src_tex, name)
