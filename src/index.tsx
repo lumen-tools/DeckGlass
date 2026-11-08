@@ -85,6 +85,7 @@ const getStates = callable<[], SaveState[]>("get_states");
 const saveState = callable<[string], ApplyResult>("save_state");
 const loadState = callable<[string], ApplyResult>("load_state");
 const deleteState = callable<[string], ApplyResult>("delete_state");
+const getStatesDir = callable<[], string>("get_states_dir");
 
 // The side panel listens here so dialogs can tell it to refresh.
 const listeners = new Set<() => void>();
@@ -423,6 +424,7 @@ function Content() {
   const [systems, setSystems] = useState<System[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [states, setStates] = useState<SaveState[]>([]);
+  const [statesDir, setStatesDir] = useState("~/DeckGlass/Save_States");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [px, setPx] = useState<number | null>(null); // manual pixel size being edited
@@ -451,6 +453,9 @@ function Content() {
       const [l, s] = await Promise.all([getLibrary(), getSystems()]);
       setLibrary(l);
       setSystems(s);
+      getStatesDir()
+        .then((d) => setStatesDir(d.replace(/^\/home\/[^/]+/, "~")))
+        .catch(() => {});
       await refresh();
       await run(() => reapply());
     })();
@@ -652,6 +657,11 @@ function Content() {
         <PanelSectionRow>
           <div style={{ fontSize: "12px", opacity: 0.7 }}>
             Parameters reset when you choose another shader or save state. Save a state to keep them.
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div style={{ fontSize: "12px", opacity: 0.7, wordBreak: "break-all" }}>
+            Each save state is a file in {statesDir} – copy them to back up or share.
           </div>
         </PanelSectionRow>
       </PanelSection>

@@ -30,7 +30,7 @@ Presets are picked in a file browser, like in RetroArch, with three top folders 
 - **Enable shader / Only in games:** "Only in games" keeps the Steam menus untouched. If it is off, the shader starts disabled after a restart.
 - **Per-game settings:** while a game is running, this switch stores all settings for that game only. When the game quits, the global settings apply again.
 - **Parameters:** a separate dialog with all sliders of the preset; changes are applied when you press Apply or close it. Changes stay as long as you keep the shader – also across restarts – and reset when you choose another shader or save state.
-- **Save states:** store the shader, source resolution and all parameters under a name (e.g. `retro-crisis-ps2-dirty-1.5x`), load them from a dropdown, replace or delete them. Per-game settings remember the loaded save state.
+- **Save states:** store the shader, source resolution and all parameters under a name (e.g. `retro-crisis-ps2-dirty-1.5x`), load them from a dropdown, replace or delete them. Per-game settings remember the loaded save state. Each save state is a file in `~/DeckGlass/Save_States` – copy it to back it up or to use it on another Deck.
 - **OLED defringe (Deck OLED only):** the subpixel layout of some Deck OLED screens (Samsung panel) causes slight colour fringing that a small number of people notice. This switch adds a small correction pass – taken from Reshadeck's `DefringSamsungOLEDeck.fx` – on top of any shader, or on its own. It is hidden on the LCD model and off by default.
 - **Crash guard:** if gamescope crashes right after a shader is applied, the shader is turned off and a warning is shown. A normal restart of the Deck is not treated as a crash.
 

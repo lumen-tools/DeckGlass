@@ -44,6 +44,11 @@ CUSTOM_DIR = os.path.join(decky.DECKY_USER_HOME, "DeckGlass", CUSTOM_NAME)
 # earlier locations, moved into CUSTOM_DIR on start
 OLD_CUSTOM_DIRS = [os.path.join(decky.DECKY_USER_HOME, "deckglass-shaders"),           # before 0.8.1
                    os.path.join(decky.DECKY_USER_HOME, "DeckGlass", "Custom Shaders")]  # 0.8.1
+# Save states: one file per state (<name>.json), so they can be copied, backed up and
+# shared, and survive a reinstall of the plugin.
+STATES_NAME = "Save_States"
+STATES_DIR = os.path.join(decky.DECKY_USER_HOME, "DeckGlass", STATES_NAME)
+STATE_EXT = ".json"
 LIBRARIES = [
     ("RetroArch", BUNDLED_SLANG),
     ("Retro_Crisis", os.path.join(PLUGIN_DIR, "shaders", "rc", "retro crisis")),
@@ -83,7 +88,6 @@ DEFAULT_SETTINGS = {
     "bilinear": True,        # bilinear filtering when the game image is scaled down
     "params": {},            # parameter values of the current preset: {name: value}
     "state": None,           # name of the loaded save state, if any
-    "states": {},            # save states: name -> snapshot of preset, source resolution and parameters
     "only_in_game": True,    # keep the Steam UI untouched
     "oled_defringe": False,  # Deck OLED only: reduce colour fringing (device setting, not per game)
     "profiles": {},          # Steam app id -> per-game copy of PROFILE_KEYS (+ "name")
@@ -180,16 +184,19 @@ def _migrate_key(key):
     return key
 
 
+def _migrate_block(block):
+    if block.get("system") in OLD_SYSTEM_IDS:
+        block["system"] = OLD_SYSTEM_IDS[block["system"]]
+    if "preset" in block:
+        block["preset"] = _migrate_key(block["preset"])
+    if isinstance(block.get("params"), dict):
+        block["params"] = {_migrate_key(k): v for k, v in block["params"].items()}
+
+
 def _migrate(data):
     """Rewrite preset keys saved by older versions (settings, per-preset parameters,
     per-game profiles)."""
-    def fix(block):
-        if block.get("system") in OLD_SYSTEM_IDS:
-            block["system"] = OLD_SYSTEM_IDS[block["system"]]
-        if "preset" in block:
-            block["preset"] = _migrate_key(block["preset"])
-        if isinstance(block.get("params"), dict):
-            block["params"] = {_migrate_key(k): v for k, v in block["params"].items()}
+    fix = _migrate_block
     fix(data)
     for st in (data.get("states") or {}).values():
         if isinstance(st, dict):
@@ -217,6 +224,95 @@ def _migrate(data):
                 prof["game_height"] = 720
         data["values_720_800"] = True
     return data
+
+
+def _state_filename(name):
+    """File name for a save state name: characters that cannot be part of a file name
+    are replaced, a leading dot (hidden file) is removed."""
+    clean = "".join("-" if c in '/\\\0' or ord(c) < 32 else c for c in name).strip().lstrip(".").strip()
+    return clean[:64]
+
+
+def _state_path(name):
+    fname = _state_filename(name or "")
+    return os.path.join(STATES_DIR, fname + STATE_EXT) if fname else None
+
+
+def _read_state(name):
+    path = _state_path(name)
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        logger.exception(f"could not read save state {path}")
+        return None
+    if not isinstance(data, dict) or not data.get("preset"):
+        return None
+    _migrate_block(data)
+    return {k: data[k] for k in STATE_KEYS if k in data}
+
+
+def _write_state(name, state):
+    os.makedirs(STATES_DIR, exist_ok=True)
+    path = _state_path(name)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"deckglass_save_state": 1, **state}, f, indent=1)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def _list_states():
+    out = []
+    try:
+        entries = os.listdir(STATES_DIR)
+    except OSError:
+        return out
+    for entry in entries:
+        if entry.startswith(".") or not entry.lower().endswith(STATE_EXT):
+            continue
+        name = entry[:-len(STATE_EXT)]
+        st = _read_state(name)
+        if st:
+            out.append({"name": name, "preset": st.get("preset")})
+    out.sort(key=lambda x: x["name"].lower())
+    return out
+
+
+def _move_states_to_files(settings):
+    """Before 0.9 all save states were stored inside settings.json: write each one to
+    its own file. Returns True when settings changed."""
+    states = settings.get("states")
+    if not isinstance(states, dict) or not states:
+        return settings.pop("states", None) is not None
+    # keep a copy of the old settings file, just in case
+    backup = os.path.join(os.path.dirname(STATES_DIR), "settings-before-0.9.json")
+    if os.path.isfile(SETTINGS_FILE) and not os.path.exists(backup):
+        os.makedirs(os.path.dirname(backup), exist_ok=True)
+        shutil.copy2(SETTINGS_FILE, backup)
+    renamed = {}
+    for name, st in states.items():
+        if not isinstance(st, dict) or not st.get("preset"):
+            continue
+        base = _state_filename(name) or "save-state"
+        target, n = base, 2
+        while os.path.exists(_state_path(target)):
+            existing = _read_state(target)
+            if existing == {k: st[k] for k in STATE_KEYS if k in st}:
+                break  # already moved (e.g. an earlier attempt)
+            target, n = f"{base} ({n})", n + 1
+        else:
+            _write_state(target, {k: st[k] for k in STATE_KEYS if k in st})
+        if target != name:
+            renamed[name] = target
+    for block in [settings] + [p for p in (settings.get("profiles") or {}).values() if isinstance(p, dict)]:
+        if block.get("state") in renamed:
+            block["state"] = renamed[block["state"]]
+    settings.pop("states", None)
+    logger.info(f"moved {len(states)} save states to {STATES_DIR}")
+    return True
 
 
 def _move_old_custom_dir():
@@ -564,26 +660,31 @@ class Plugin:
 
     # ------------------------------------------------------------------ save states
     async def get_states(self):
-        states = Plugin.settings.get("states") or {}
-        return [{"name": n, "preset": st.get("preset")} for n, st in sorted(states.items(), key=lambda x: x[0].lower())]
+        return await asyncio.to_thread(_list_states)
+
+    async def get_states_dir(self):
+        return STATES_DIR
 
     async def save_state(self, name):
-        name = " ".join(str(name or "").split())[:64]
+        name = _state_filename(" ".join(str(name or "").split()))
         if not name:
             return {"ok": False, "error": "Please enter a name", "params": []}
         async with Plugin.lock:
             a = Plugin._active()
             if not a.get("preset"):
                 return {"ok": False, "error": "Choose a preset first", "params": []}
-            Plugin.settings.setdefault("states", {})[name] = {k: copy.deepcopy(a.get(k, DEFAULT_SETTINGS[k]))
-                                                             for k in STATE_KEYS}
+            try:
+                _write_state(name, {k: copy.deepcopy(a.get(k, DEFAULT_SETTINGS[k])) for k in STATE_KEYS})
+            except OSError as e:
+                logger.exception("save state")
+                return {"ok": False, "error": f"Could not save: {e.strerror or e}", "params": []}
             a["state"] = name
             Plugin._save()
             return await Plugin._apply()
 
     async def load_state(self, name):
         async with Plugin.lock:
-            st = (Plugin.settings.get("states") or {}).get(name)
+            st = _read_state(name)
             if not st:
                 return {"ok": False, "error": "Save state not found", "params": []}
             a = Plugin._active()
@@ -598,7 +699,14 @@ class Plugin:
 
     async def delete_state(self, name):
         async with Plugin.lock:
-            (Plugin.settings.get("states") or {}).pop(name, None)
+            path = _state_path(name)
+            if path:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    return {"ok": False, "error": f"Could not delete: {e.strerror or e}", "params": []}
             for block in [Plugin.settings] + list((Plugin.settings.get("profiles") or {}).values()):
                 if block.get("state") == name:
                     block["state"] = None
@@ -643,6 +751,7 @@ class Plugin:
         try:
             os.makedirs(CUSTOM_DIR, exist_ok=True)
             _move_old_custom_dir()
+            os.makedirs(STATES_DIR, exist_ok=True)
         except OSError:
             logger.exception("could not create custom shader folder")
         for tool in ("glslang", "spirv-cross"):
@@ -652,6 +761,11 @@ class Plugin:
             except OSError:
                 pass
         await Plugin._load()
+        try:
+            if _move_states_to_files(Plugin.settings):
+                Plugin._save()
+        except OSError:
+            logger.exception("could not move save states to files")
         if os.path.exists(GUARD_FILE):
             try:
                 with open(GUARD_FILE) as f:
