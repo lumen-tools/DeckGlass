@@ -58,7 +58,7 @@ Result: `out/DeckGlass-<version>.zip`, installable via Decky (developer mode →
 
 ## Disclaimer
 
-Not affiliated with Valve, libretro or Retro Crisis. "Steam" and "Steam Deck" are trademarks of Valve Corporation.
+Not affiliated with ShaderGlass (mausimus), Valve, libretro or Retro Crisis; DeckGlass is an independent project and contains no ShaderGlass code. Developed with the help of Claude (AI). "Steam" and "Steam Deck" are trademarks of Valve Corporation.
 
 ## License
 
